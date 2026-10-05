@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DSH Portable</string>
+
+    <string name="status_checking">正在检查环境…</string>
+    <string name="status_installing">首次启动：正在安装 Debian 环境</string>
+    <string name="status_installed">环境就绪</string>
+    <string name="status_starting">正在启动 DeepSeek Harness…</string>
+    <string name="status_running">运行中</string>
+    <string name="status_stopped">已停止</string>
+    <string name="status_error">出错了</string>
+
+    <string name="btn_start">启动</string>
+    <string name="btn_stop">停止</string>
+    <string name="btn_restart">重启</string>
+    <string name="btn_settings">设置</string>
+    <string name="btn_console">控制台</string>
+    <string name="btn_browser">浏览器打开</string>
+    <string name="btn_hide_bar">隐藏工具条</string>
+
+    <string name="settings_title">设置</string>
+    <string name="settings_port">服务端口</string>
+    <string name="settings_port_hint">默认 3080，仅监听 127.0.0.1</string>
+    <string name="settings_backend">运行环境</string>
+    <string name="settings_reinstall">重新安装 Debian 环境</string>
+    <string name="settings_reinstall_note">删除已安装的根文件系统，下次启动会重新解压（约 1 分钟）。</string>
+    <string name="settings_about">关于与开源协议</string>
+    <string name="about_entry">关于与开源协议</string>
+    <string name="about_entry_note">查看参考项目、版本号与各自的开源协议全文。</string>
+    <string name="about_title">关于</string>
+    <string name="about_section_projects">参考项目</string>
+    <string name="about_projects_note">本应用是基于它们组装起来的启动器与外壳</string>
+    <string name="about_disclaimer">本应用自身只是启动器与外壳：版权归上述各项目作者所有，按各自协议分发。PRoot 以 GPL-2.0、talloc 以 LGPL-3.0 分发，完整文本见下方。随包分发的 Debian 根文件系统中每个软件包保留其自身协议，详见系统内 /usr/share/doc。</string>
+    <string name="about_view_licenses">查看完整协议文本</string>
+    <string name="about_view_notices">查看版权声明</string>
+    <string name="about_close">关闭</string>
+    <string name="settings_save">保存</string>
+    <string name="settings_reset">恢复默认</string>
+
+    <string name="notif_channel">DSH 服务</string>
+    <string name="notif_channel_desc">保活通知，用于让 DeepSeek Harness 在后台持续运行</string>
+    <string name="notif_title">DSH Portable</string>
+    <string name="notif_text">DeepSeek Harness 服务已在后台启动</string>
+    <string name="notif_stop">停止服务</string>
+
+    <string name="settings_mounts">目录挂载</string>
+    <string name="settings_mounts_note">把手机上的目录挂进 Debian。目标目录必须是 Debian 里的空目录（例如 /root/workspace 或 /mnt/phone），否则会遮挡原有文件。</string>
+    <string name="settings_mount_add">添加挂载</string>
+    <string name="settings_mount_host">手机目录（宿主路径）</string>
+    <string name="settings_mount_guest">Debian 内路径（必须是空目录）</string>
+    <string name="settings_mount_grant">申请存储权限</string>
+    <string name="settings_mount_granted">已获得全部文件访问权限</string>
+    <string name="settings_mount_none">尚未配置挂载</string>
+    <string name="mount_preset_download">Download</string>
+    <string name="mount_preset_docs">Documents</string>
+    <string name="mount_preset_dcim">DCIM</string>
+
+    <string name="settings_keepalive">后台保活</string>
+    <string name="settings_keepalive_note">常驻通知栏，阻止系统在后台杀掉服务。关闭后离开应用一段时间服务可能被系统回收。</string>
+
+    <string name="hint_title">提示</string>
+    <string name="hint_message">长按顶部左侧的「DSH Portable」标题即可打开设置。
+
+里面可以：
+· 把手机目录挂载进 Debian
+· 修改服务端口
+· 开关后台保活</string>
+    <string name="hint_ok">知道了</string>
+
+    <string name="err_port">端口无效</string>
+</resources>

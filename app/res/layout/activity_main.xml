@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/scrim">
+
+    <LinearLayout
+        android:id="@+id/statusBar"
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@color/bar_bg"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
+
+        <View
+            android:id="@+id/statusDot"
+            android:layout_width="10dp"
+            android:layout_height="10dp"
+            android:layout_marginStart="12dp"
+            android:background="@drawable/dot_idle" />
+
+        <!-- The title is the settings affordance: long-press opens settings. -->
+        <TextView
+            android:id="@+id/titleText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="@color/bar_fg"
+            android:text="@string/app_name" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textSize="12sp"
+            android:textColor="@color/bar_fg_dim"
+            android:text="@string/status_checking" />
+
+        <Button
+            android:id="@+id/btnConsole"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:minWidth="0dp"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textSize="13sp"
+            android:textColor="@color/bar_fg_dim"
+            android:background="@android:color/transparent"
+            android:text="@string/btn_console" />
+    </LinearLayout>
+
+    <WebView
+        android:id="@+id/webView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginTop="50dp"
+        android:visibility="gone" />
+
+    <!-- Shown until the WebView takes over; also the first-run installation UI. -->
+    <LinearLayout
+        android:id="@+id/splash"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingTop="72dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:textColor="@color/bar_fg"
+            android:text="@string/app_name" />
+
+        <TextView
+            android:id="@+id/splashHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:gravity="center"
+            android:textSize="14sp"
+            android:lineSpacingExtra="4dp"
+            android:textColor="@color/bar_fg_dim"
+            android:text="@string/status_checking" />
+
+        <ProgressBar
+            android:id="@+id/splashProgress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="6dp"
+            android:layout_marginTop="22dp"
+            android:max="100"
+            android:progress="0"
+            android:indeterminate="true"
+            android:progressTint="@color/accent" />
+
+        <ScrollView
+            android:id="@+id/splashLogScroll"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="18dp"
+            android:background="@color/bar_bg"
+            android:padding="10dp">
+
+            <TextView
+                android:id="@+id/splashLog"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="11sp"
+                android:fontFamily="monospace"
+                android:textColor="@color/bar_fg_dim"
+                android:textIsSelectable="true" />
+        </ScrollView>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="14dp"
+            android:layout_marginBottom="20dp">
+
+            <Button
+                android:id="@+id/btnPrimary"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:textColor="@android:color/white"
+                android:background="@color/accent"
+                android:text="@string/btn_start" />
+
+            <Button
+                android:id="@+id/btnSecondary"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:layout_marginStart="10dp"
+                android:textColor="@color/bar_fg"
+                android:background="@color/field_bg"
+                android:visibility="gone"
+                android:text="@string/btn_restart" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Console drawer: raw server output, useful when the UI cannot load. -->
+    <LinearLayout
+        android:id="@+id/consolePanel"
+        android:layout_width="match_parent"
+        android:layout_height="280dp"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:background="#F215171C"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="14dp"
+            android:paddingEnd="4dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/bar_fg"
+                android:text="@string/btn_console" />
+
+            <Button
+                android:id="@+id/btnCloseConsole"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:minWidth="0dp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:textSize="13sp"
+                android:textColor="@color/bar_fg_dim"
+                android:background="@android:color/transparent"
+                android:text="关闭" />
+        </LinearLayout>
+
+        <ScrollView
+            android:id="@+id/consoleScroll"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="12dp">
+
+            <TextView
+                android:id="@+id/consoleText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="10.5sp"
+                android:fontFamily="monospace"
+                android:textColor="#FFB9C0CC"
+                android:textIsSelectable="true" />
+        </ScrollView>
+    </LinearLayout>
+</FrameLayout>

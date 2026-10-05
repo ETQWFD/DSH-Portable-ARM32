@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Legacy launcher icon (API < 26): black tile, so no pale ring appears. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M24,6 L84,6 A18,18 0 0 1 102,24 L102,84 A18,18 0 0 1 84,102 L24,102 A18,18 0 0 1 6,84 L6,24 A18,18 0 0 1 24,6 Z" />
+    <path
+        android:fillColor="#FF4D6BFE"
+        android:pathData="M36,40 L50,54 L36,68 L31,63 L40.5,54 L31,45 Z" />
+    <path
+        android:fillColor="#FFE8EAED"
+        android:pathData="M55,64 L77,64 L77,70 L55,70 Z" />
+    <path
+        android:fillColor="#FF9AA0A6"
+        android:pathData="M55,50 L71,50 L71,56 L55,56 Z" />
+</vector>

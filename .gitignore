@@ -1,0 +1,52 @@
+# ---- Build outputs ----------------------------------------------------------
+build/*
+!build/native/
+!build/native/*
+
+# The rootfs is a ~154 MB generated artifact (and its ~520 MB unpacked tree).
+# Regenerate with scripts/build-rootfs.sh -- never commit either form.
+app/payload/rootfs/*.tar.gz
+app/payload/rootfs/*.tar
+
+# ---- Android SDK / toolchain -------------------------------------------------
+# Local copies of the SDK and the unpacked reference rootfs live here during
+# development. They are hundreds of megabytes of third-party binaries.
+sdk/
+rootfs/
+termux-debs/
+*.deb
+
+# ---- Android build leftovers -------------------------------------------------
+*.apk
+*.ap_
+*.dex
+*.class
+gen/
+local.properties
+
+# ---- Signing material (must never be committed) ------------------------------
+*.keystore
+*.jks
+*.p12
+debug.keystore
+
+# ---- Local scratch from build/test runs --------------------------------------
+testtmp/
+workspace/
+/app/start.sh
+
+# ---- Runtime state / secrets -------------------------------------------------
+.credentials.yaml
+.dsh/
+*.log
+
+# ---- Editors / OS ------------------------------------------------------------
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# ---- Python ------------------------------------------------------------------
+__pycache__/
+*.pyc

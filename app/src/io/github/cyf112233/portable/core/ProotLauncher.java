@@ -51,6 +51,7 @@ public final class ProotLauncher {
     private Thread stderrThread;
     private volatile String uiUrl;
     private Listener listener;
+    private final List<MountReport> mountReports = new ArrayList<MountReport>();
 
     public interface Listener {
         void onLine(String line);
@@ -58,6 +59,29 @@ public final class ProotLauncher {
         void onUrl(String url);
 
         void onExit(int code);
+
+        /**
+         * One entry per configured mount, reported once the guest process is up.
+         * The applied mounts cannot be checked from the app side: Android gives
+         * each process its own storage view, so only the guest can see whether the
+         * bind actually carries the phone's files.
+         */
+        void onMounts(List<MountReport> reports);
+    }
+
+    /** Outcome of applying one configured mount. */
+    public static final class MountReport {
+        public final String hostPath;
+        public final String guestPath;
+        public final boolean applied;
+        public final String detail;
+
+        MountReport(String hostPath, String guestPath, boolean applied, String detail) {
+            this.hostPath = hostPath;
+            this.guestPath = guestPath;
+            this.applied = applied;
+            this.detail = detail;
+        }
     }
 
     public ProotLauncher(Context context, RootfsInstaller rootfs) {
@@ -138,7 +162,19 @@ public final class ProotLauncher {
 
         List<String> cmd = new ArrayList<String>();
         cmd.add(prootBin.getAbsolutePath());
-        cmd.add("--link2symlink");
+        // No --link2symlink on purpose. PRoot offers it to emulate hard links on
+        // filesystems that lack them, but here it does the opposite of what the
+        // guest needs: link() is redirected into a symlink pointing at PRoot's own
+        // temp area, so a file published that way is not really at its path.
+        // dsh's filesystem backend publishes new files through a hard link
+        // (dsh-fs-local, "hard-link no-replace primitive"), so with the flag on
+        // every such write leaves a dangling symlink and the content disappears
+        // with the staging directory. Both ext4 and Android's FUSE storage support
+        // real hard links, so the flag only causes harm here.
+        // -0 (fake root) is kept: -0 is exactly "-i 0:0", and the rootfs and the
+        // tools inside it were built expecting a root identity. Dropping it made
+        // the guest a stranger in its own tree. The uid mismatch this creates is
+        // handled on the write side instead (see the note on the extractor).
         cmd.add("-0");
         cmd.add("-r");
         cmd.add(root.getAbsolutePath());
@@ -158,18 +194,31 @@ public final class ProotLauncher {
         cmd.add(script.getAbsolutePath() + ":/root/start.sh");
         // User-configured mounts come last so they win over the built-ins, and
         // each guest path is created (and checked empty) first.
+        mountReports.clear();
         if (app != null) {
             for (Mount mount : app.mounts()) {
-                if (!mount.isUsable()) {
+                if (!mount.enabled) {
+                    mountReports.add(new MountReport(mount.hostPath, mount.guestPath,
+                            false, "已禁用"));
+                    continue;
+                }
+                File host = new File(mount.hostPath);
+                if (!host.isDirectory()) {
+                    mountReports.add(new MountReport(mount.hostPath, mount.guestPath,
+                            false, "手机上的目录不存在或不可读"));
                     continue;
                 }
                 StringBuilder reason = new StringBuilder();
-                if (Mount.prepareGuestDir(root, mount.guestPath, reason) == null) {
-                    Log.w(TAG, "skipping mount " + mount.hostPath + ": " + reason);
+                StringBuilder notice = new StringBuilder();
+                if (Mount.prepareGuestDir(root, mount.guestPath, reason, notice) == null) {
+                    mountReports.add(new MountReport(mount.hostPath, mount.guestPath,
+                            false, reason.toString()));
                     continue;
                 }
                 cmd.add("-b");
                 cmd.add(mount.hostPath + ":" + mount.guestPath);
+                mountReports.add(new MountReport(mount.hostPath, mount.guestPath,
+                        true, notice.length() > 0 ? notice.toString() : ""));
                 Log.i(TAG, "bind " + mount.hostPath + " -> " + mount.guestPath);
             }
         }
@@ -215,6 +264,10 @@ public final class ProotLauncher {
         }, "dsh-wait");
         waiter.setDaemon(true);
         waiter.start();
+
+        if (listener != null && !mountReports.isEmpty()) {
+            listener.onMounts(new ArrayList<MountReport>(mountReports));
+        }
         return actualPort;
     }
 
@@ -317,6 +370,121 @@ public final class ProotLauncher {
         });
         killer.setDaemon(true);
         killer.start();
+    }
+
+
+    /**
+     * Re-enter the guest in a throwaway process and list each mount point.
+     *
+     * This is the only trustworthy check: the app's own view of shared storage
+     * differs from the guest's, so a bind that looks fine from here can still be
+     * an empty shadow over there. Results arrive as MOUNT_* lines on the callback.
+     */
+    public void probeMounts(List<MountReport> reports, final LineSink sink) {
+        if (reports.isEmpty()) {
+            return;
+        }
+        StringBuilder paths = new StringBuilder();
+        for (MountReport report : reports) {
+            if (report.applied) {
+                paths.append(report.guestPath).append('\n');
+            }
+        }
+        if (paths.length() == 0) {
+            return;
+        }
+
+        try {
+            File nativeDir = new File(context.getApplicationInfo().nativeLibraryDir);
+            File prootBin = new File(nativeDir, LIB_PROOT);
+            File loaderBin = new File(nativeDir, LIB_LOADER);
+            File root = rootfs.rootfsDir();
+            File prootTmp = new File(context.getCacheDir(), "proot");
+            File libDir = prepareLinkerLibs(nativeDir);
+            File probe = new File(context.getFilesDir(), "probe-mounts.sh");
+            writeAsset("scripts/probe-mounts.sh", probe);
+
+            List<String> cmd = new ArrayList<String>();
+            cmd.add(prootBin.getAbsolutePath());
+            cmd.add("-0");
+            cmd.add("-r");
+            cmd.add(root.getAbsolutePath());
+            cmd.add("-b");
+            cmd.add("/dev");
+            cmd.add("-b");
+            cmd.add("/proc");
+            cmd.add("-b");
+            cmd.add(prootTmp.getAbsolutePath() + ":/tmp");
+            cmd.add("-b");
+            cmd.add(probe.getAbsolutePath() + ":/root/probe-mounts.sh");
+            for (Mount mount : (app == null ? java.util.Collections.<Mount>emptyList() : app.mounts())) {
+                if (mount.isUsable()) {
+                    cmd.add("-b");
+                    cmd.add(mount.hostPath + ":" + mount.guestPath);
+                }
+            }
+            cmd.add("/bin/sh");
+            cmd.add("/root/probe-mounts.sh");
+
+            ProcessBuilder builder = new ProcessBuilder(cmd);
+            builder.environment().clear();
+            builder.environment().put("PROOT_TMP_DIR", prootTmp.getAbsolutePath());
+            if (loaderBin.isFile()) {
+                builder.environment().put("PROOT_LOADER", loaderBin.getAbsolutePath());
+            }
+            builder.environment().put("LD_LIBRARY_PATH",
+                    libDir.getAbsolutePath() + ":" + nativeDir.getAbsolutePath());
+            builder.environment().put("DSH_MOUNT_PATHS", base64(paths.toString()));
+
+            final Process process = builder.start();
+            Thread reader = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    java.io.BufferedReader in = null;
+                    try {
+                        in = new java.io.BufferedReader(new java.io.InputStreamReader(
+                                process.getInputStream(), Charset.forName("UTF-8")));
+                        String line;
+                        while ((line = in.readLine()) != null) {
+                            if (sink != null && line.startsWith("MOUNT_")) {
+                                sink.onLine(line);
+                            }
+                        }
+                    } catch (IOException e) {
+                        Log.w(TAG, "probe reader stopped: " + e.getMessage());
+                    } finally {
+                        if (in != null) {
+                            try {
+                                in.close();
+                            } catch (IOException ignored) {
+                                // Nothing useful to do while tearing down.
+                            }
+                        }
+                    }
+                }
+            }, "dsh-probe");
+            reader.setDaemon(true);
+            reader.start();
+        } catch (Exception e) {
+            Log.w(TAG, "mount probe failed to start: " + e.getMessage());
+            if (sink != null) {
+                sink.onLine("MOUNT_FAIL - 无法启动校验进程：" + e.getMessage());
+            }
+        }
+    }
+
+    /** Receives one line of probe output. */
+    public interface LineSink {
+        void onLine(String line);
+    }
+
+    private static String base64(String text) {
+        try {
+            return android.util.Base64.encodeToString(
+                    text.getBytes("UTF-8"), android.util.Base64.NO_WRAP);
+        } catch (java.io.UnsupportedEncodingException e) {
+            return "";
+        }
     }
 
     /**

@@ -92,26 +92,62 @@ public final class Mount {
     }
 
     /**
-     * The directory a guest mount point must be created as, verified to be empty.
+     * Resolve the directory that a guest mount point needs, creating it if absent.
+     *
+     * A non-empty guest directory is allowed but reported through {@code notice}:
+     * PRoot binds over it, so whatever was there becomes invisible to the guest
+     * while the mount is active. Rejecting it outright would block the common case
+     * of aiming at a path the rootfs already populates (such as /root/workspace),
+     * which looks to the user like the mount silently did nothing.
      *
      * @return null when the path cannot be used, with {@code reason} explaining why.
      */
-    public static File prepareGuestDir(File rootfs, String guestPath, StringBuilder reason) {
-        File dir = new File(rootfs, guestPath.startsWith("/") ? guestPath.substring(1) : guestPath);
+    public static File prepareGuestDir(File rootfs, String guestPath,
+                                       StringBuilder reason, StringBuilder notice) {
+        String relative = guestPath.startsWith("/") ? guestPath.substring(1) : guestPath;
+
+        // Resolve through any symlink in the rootfs (Debian has /bin -> usr/bin and
+        // friends): PRoot follows the link when it resolves the bind target, so the
+        // real directory is what must exist.
+        File dir = new File(rootfs, relative);
+        try {
+            File parent = dir.getParentFile();
+            if (parent != null && parent.getCanonicalPath().length() > 0) {
+                dir = new File(parent.getCanonicalFile(), dir.getName());
+            }
+        } catch (java.io.IOException ignored) {
+            // Fall back to the literal path; a bad link surfaces as a create failure.
+        }
+
         if (dir.exists()) {
             if (!dir.isDirectory()) {
                 reason.append(guestPath).append(" 在 Debian 里已存在且不是目录");
                 return null;
             }
             String[] children = dir.list();
-            if (children != null && children.length > 0) {
-                reason.append(guestPath).append(" 在 Debian 里不是空目录，无法挂载");
-                return null;
+            if (children != null && children.length > 0 && notice != null) {
+                notice.append(guestPath).append(" 原本有 ")
+                        .append(children.length)
+                        .append(" 项内容，挂载期间会被手机目录遮住");
             }
         } else if (!dir.mkdirs() && !dir.isDirectory()) {
             reason.append("无法创建 ").append(guestPath);
             return null;
         }
         return dir;
+    }
+
+    /** Convenience overload for callers that do not care about the non-empty notice. */
+    public static File prepareGuestDir(File rootfs, String guestPath, StringBuilder reason) {
+        return prepareGuestDir(rootfs, guestPath, reason, null);
+    }
+
+    /**
+     * Where the access check should look: the host directory mapped back to its
+     * in-rootfs path, so it can be probed inside the guest rather than from the app.
+     */
+    public String guestProbePath(String tag) {
+        String base = guestPath.endsWith("/") ? guestPath : guestPath + "/";
+        return base + tag;
     }
 }

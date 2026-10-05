@@ -64,6 +64,10 @@ public class SettingsActivity extends Activity {
 
         editPort.setText(Integer.toString(app.port()));
         switchKeepAlive.setChecked(app.keepAlive());
+        TextView subtitle = (TextView) findViewById(R.id.settingsSubtitle);
+        if (app.launcher().isRunning() && app.launcher().uiUrl() != null) {
+            subtitle.setText("服务运行中；修改端口或挂载后请重启服务");
+        }
         renderRootfsInfo();
         renderMounts();
 
@@ -267,9 +271,14 @@ public class SettingsActivity extends Activity {
                         // The guest path must be empty, or the bind would hide the
                         // files the rootfs keeps there.
                         StringBuilder reason = new StringBuilder();
-                        if (Mount.prepareGuestDir(app.installer().rootfsDir(), guest, reason) == null) {
+                        StringBuilder notice = new StringBuilder();
+                        if (Mount.prepareGuestDir(app.installer().rootfsDir(), guest,
+                                reason, notice) == null) {
                             toast(reason.toString());
                             return;
+                        }
+                        if (notice.length() > 0) {
+                            toast(notice.toString());
                         }
                         List<Mount> mounts = app.mounts();
                         mounts.add(new Mount(hostPath, guest, true));
@@ -343,8 +352,10 @@ public class SettingsActivity extends Activity {
             version = "?";
         }
         textRootfsInfo.setText(String.format(Locale.US,
-                "Debian 根文件系统：%s\n占用空间：%.1f MB\n服务地址：http://127.0.0.1:%d\n应用版本：%s",
+                "Debian 根文件系统  %s\n占用空间  %.0f MB\n服务地址  http://127.0.0.1:%d\n应用版本  %s",
                 installed ? "已安装" : "未安装", bytes / 1048576.0, app.port(), version));
+        TextView footer = (TextView) findViewById(R.id.textVersion);
+        footer.setText("DSH Portable " + version + " · GPL-3.0-or-later");
     }
 
     private void save() {

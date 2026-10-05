@@ -94,6 +94,27 @@ cat > "$ROOT/root/.dsh/profiles/web/cordis.patch.yml" <<'YAML'
 - insert:
     - id: dsh-web-mobile
       name: 'dsh-web-mobile'
+
+# sandbox-policy: dsh-base asks for 'workspace-write', which the local sandbox
+# provider can only honour through bwrap or Landlock. Neither can work inside a
+# PRoot guest, so every bash call fails with "sandbox mode workspace-write is
+# requested but no sandbox backend is usable on this host; refusing to run the
+# command unconfined". The guest is already the confinement layer here -- an
+# unprivileged Android app chrooted into its own private directory -- so the
+# inner fence is set to danger-full-access, exactly as dsh's own sdk-minimal
+# bundle does. Without this the agent cannot run a single shell command.
+- id: sandbox-policy
+  config:
+    mode: danger-full-access
+
+# permission: presets bundle a sandbox mode together with an approval policy, and
+# danger-full-access only pairs with approval=never. Left to infer, the pair
+# resolves to "custom" and the plugin refuses to mount ("composed sandbox and
+# approval defaults match no preset"), which is a warning on the host but a hard
+# stop for the agent's tooling here. Naming the preset makes the pair explicit.
+- id: permission
+  config:
+    defaultPreset: danger-full-access
 YAML
 
 # ---- 4. trim -----------------------------------------------------------------
@@ -129,7 +150,14 @@ for n in null zero random urandom; do
     [ -e "$ROOT/dev/$n" ] || : > "$ROOT/dev/$n"
 done
 
-# ---- 6. pack -----------------------------------------------------------------
+# ---- 6. platform patches -----------------------------------------------------
+# dsh is patched in place; see scripts/patch-dsh.py for what and why. Keeping
+# it here means a rebuilt rootfs always carries the patch, and re-applying is a
+# no-op, so this stays safe to run repeatedly.
+log "patching dsh for Android filesystems"
+python3 "$HERE/scripts/patch-dsh.py" "$ROOT"
+
+# ---- 7. pack -----------------------------------------------------------------
 log "packing"
 for m in dev/pts dev proc sys; do
     mountpoint -q "$ROOT/$m" 2>/dev/null && umount "$ROOT/$m" || true

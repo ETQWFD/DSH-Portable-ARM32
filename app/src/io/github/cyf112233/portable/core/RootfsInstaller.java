@@ -26,8 +26,21 @@ public final class RootfsInstaller {
 
     private static final String TAG = "DshRootfs";
 
-    /** Bump when the bundled rootfs changes so upgrades re-extract. */
-    private static final int ROOTFS_REVISION = 1;
+    /**
+     * Bump whenever the packaged rootfs changes.
+     *
+     * This integer is the only signal an installed device has that its extracted
+     * tree is stale, so a rootfs change without a bump ships an APK whose new
+     * payload is simply never unpacked. Reusing a number that a device already
+     * carries is the same mistake in a different shape.
+     *
+     * History, newest first:
+     *   9  apply the dsh patches (filesystem publish, forced full access) and keep
+     *      /root across a reinstall. Earlier revisions are not distinguishable on
+     *      a device that saw them only as intermediate builds.
+     *   2  first shipping revision of the published APK.
+     */
+    private static final int ROOTFS_REVISION = 9;
 
     private static final String ASSET_ARCHIVE = "rootfs/debian-arm64.tar.gz";
 
@@ -85,7 +98,22 @@ public final class RootfsInstaller {
      */
     public void install(Listener listener) {
         File dest = rootfsDir();
+        // Everything under /root belongs to the user, not to the image: API keys,
+        // sessions, the workspace, and any profile tweaks they made. Re-extracting
+        // the rootfs must not throw those away, so the directory is moved aside and
+        // put back over the fresh tree afterwards.
+        File preserved = new File(context.getFilesDir(), "preserved-root");
         try {
+            listener.onProgress("备份用户数据（/root）…", 0);
+            deleteRecursively(preserved);
+            File oldRoot = new File(dest, "root");
+            if (oldRoot.isDirectory() && !oldRoot.renameTo(preserved)) {
+                // A failed move is not fatal; the user data simply stays in place
+                // until the wipe below, which the log records.
+                Log.w(TAG, "could not set aside " + oldRoot);
+                preserved = null;
+            }
+
             listener.onProgress("清理旧的根文件系统…", 0);
             deleteRecursively(dest);
             if (!dest.mkdirs() && !dest.isDirectory()) {
@@ -122,11 +150,36 @@ public final class RootfsInstaller {
             long elapsed = System.currentTimeMillis() - started;
             Log.i(TAG, "extracted " + entries + " entries in " + elapsed + "ms");
 
-            // The archive is built from a Linux rootfs, so every directory is 0755
-            // already; only the runtime-written paths need to be guaranteed here.
+            // Only the paths the runtime writes to are touched here. mkdirs() alone
+            // would create /tmp as 0700 and silently undo the 1777 the archive
+            // carries, which breaks every tool that expects a shared temp dir.
             File tmp = new File(dest, "tmp");
-            if (!tmp.isDirectory() && !tmp.mkdirs()) {
+            if (!tmp.isDirectory() && !tmp.mkdirs() && !tmp.isDirectory()) {
                 throw new IOException("无法创建 /tmp");
+            }
+            try {
+                android.system.Os.chmod(tmp.getAbsolutePath(), 01777);
+            } catch (Throwable e) {
+                Log.w(TAG, "could not set /tmp to 1777: " + e.getMessage());
+            }
+            // Put the user's home back, then make sure the paths the guest expects
+            // exist even when there was nothing to restore.
+            File newRoot = new File(dest, "root");
+            if (preserved != null && preserved.isDirectory()) {
+                mergeInto(preserved, newRoot);
+                deleteRecursively(preserved);
+                listener.onProgress("已恢复用户数据（/root）", 0);
+            }
+            for (String dir : new String[] { "root", "root/workspace" }) {
+                File dirFile = new File(dest, dir);
+                if (!dirFile.isDirectory() && !dirFile.mkdirs() && !dirFile.isDirectory()) {
+                    throw new IOException("无法创建 /" + dir);
+                }
+                try {
+                    android.system.Os.chmod(dirFile.getAbsolutePath(), 0700);
+                } catch (Throwable e) {
+                    Log.w(TAG, "could not set /" + dir + " to 0700: " + e.getMessage());
+                }
             }
 
             OutputStream out = new FileOutputStream(pending);
@@ -159,6 +212,77 @@ public final class RootfsInstaller {
 
     public long installedBytes() {
         return sizeOf(rootfsDir());
+    }
+
+    /**
+     * Copy {@code source} over {@code target}, keeping whatever the target already
+     * has and letting the preserved copy win on conflict.
+     *
+     * Merge rather than replace: the fresh tree carries image content the user's
+     * home never had (the shipped profile and its plugin), while the preserved copy
+     * carries everything the user accumulated. Neither side is complete on its own.
+     */
+    private static void mergeInto(File source, File target) {
+        if (!target.isDirectory() && !target.mkdirs() && !target.isDirectory()) {
+            Log.w(TAG, "could not create " + target);
+            return;
+        }
+        File[] children = source.listFiles();
+        if (children == null) {
+            return;
+        }
+        for (File child : children) {
+            File destination = new File(target, child.getName());
+            if (child.isDirectory()) {
+                mergeInto(child, destination);
+            } else if (!destination.exists() || destination.isFile()) {
+                if (destination.exists() && !destination.delete()) {
+                    Log.w(TAG, "could not replace " + destination);
+                    continue;
+                }
+                copyFile(child, destination);
+                // Preserve the stored mode: the credential file must stay 0600 or
+                // dsh refuses to start.
+                try {
+                    android.system.Os.chmod(destination.getAbsolutePath(),
+                            readModeOf(child));
+                } catch (Throwable ignored) {
+                    // Best effort; a wrong mode only affects the credential check.
+                }
+            }
+        }
+    }
+
+    /** A file's permission bits, or 0600 when they cannot be read. */
+    private static int readModeOf(File file) {
+        try {
+            return android.system.Os.stat(file.getAbsolutePath()).st_mode & 07777;
+        } catch (Throwable e) {
+            Log.w(TAG, "could not read mode of " + file + ": " + e.getMessage());
+            return 0600;
+        }
+    }
+
+    private static void copyFile(File source, File destination) {
+        try {
+            java.io.InputStream in = new java.io.FileInputStream(source);
+            try {
+                java.io.OutputStream out = new java.io.FileOutputStream(destination);
+                try {
+                    byte[] buffer = new byte[1 << 16];
+                    int read;
+                    while ((read = in.read(buffer)) > 0) {
+                        out.write(buffer, 0, read);
+                    }
+                } finally {
+                    out.close();
+                }
+            } finally {
+                in.close();
+            }
+        } catch (IOException e) {
+            Log.w(TAG, "could not preserve " + source + ": " + e.getMessage());
+        }
     }
 
     private static long sizeOf(File file) {

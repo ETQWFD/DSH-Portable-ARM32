@@ -22,6 +22,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -106,9 +107,9 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
 
         findViewById(R.id.btnConsole).setOnClickListener(new ToggleConsole());
         findViewById(R.id.btnCloseConsole).setOnClickListener(new HideConsole());
-        // The settings screen is reached by holding the title, which is the only
-        // affordance for it since the bar carries just the console button.
-        findViewById(R.id.titleText).setOnLongClickListener(new OpenSettingsLongPress());
+        // The title is the settings affordance. A tap rather than a long press:
+        // the first-run hint teaches it once, and a tap is what people try first.
+        findViewById(R.id.titleText).setOnClickListener(new OpenSettings());
         btnPrimary.setOnClickListener(new PrimaryAction());
         btnSecondary.setOnClickListener(new RestartAction());
 
@@ -131,13 +132,20 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
         if (app.hintShown()) {
             return;
         }
-        app.markHintShown();
+        View content = getLayoutInflater().inflate(R.layout.dialog_hint, null);
+        final CheckBox neverShow = (CheckBox) content.findViewById(R.id.checkNeverShow);
         new AlertDialog.Builder(this)
                 .setTitle(R.string.hint_title)
                 .setMessage(R.string.hint_message)
+                .setView(content)
                 .setPositiveButton(R.string.hint_ok, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
+                        // Only a ticked box silences it for good; dismissing keeps
+                        // the reminder for the next launch.
+                        if (neverShow.isChecked()) {
+                            app.markHintShown();
+                        }
                         dialog.dismiss();
                     }
                 })
@@ -235,12 +243,11 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
         }
     }
 
-    private final class OpenSettingsLongPress implements View.OnLongClickListener {
+    private final class OpenSettings implements View.OnClickListener {
         @Override
-        public boolean onLongClick(View v) {
+        public void onClick(View v) {
             startActivityForResult(new Intent(MainActivity.this, SettingsActivity.class),
                     REQ_SETTINGS);
-            return true;
         }
     }
 
@@ -466,6 +473,66 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
     public void onLine(String line) {
         console.add(line);
         main.post(new ApplyLine(this, line));
+    }
+
+    /** Prints one mount's outcome and, for applied ones, asks the guest to confirm. */
+    private final class ReportMounts implements Runnable {
+        private final java.util.List<ProotLauncher.MountReport> reports;
+
+        ReportMounts(java.util.List<ProotLauncher.MountReport> reports) {
+            this.reports = reports;
+        }
+
+        @Override
+        public void run() {
+            int ok = 0;
+            for (ProotLauncher.MountReport report : reports) {
+                if (report.applied) {
+                    ok++;
+                    appendLog("挂载 " + report.hostPath + " → " + report.guestPath
+                            + (report.detail.length() > 0 ? "（" + report.detail + "）" : ""));
+                } else {
+                    appendLog("挂载未生效：" + report.hostPath + " → " + report.guestPath
+                            + "：" + report.detail);
+                }
+            }
+            appendLog("共 " + reports.size() + " 项挂载，已应用 " + ok + " 项，正在校验…");
+            // The app cannot see the guest's storage view, so ask the guest itself.
+            launcher.probeMounts(reports, new MountProbeLines());
+        }
+    }
+
+    /** Turns the probe's MOUNT_* lines into readable console output. */
+    private final class MountProbeLines implements ProotLauncher.LineSink {
+        @Override
+        public void onLine(String line) {
+            String text;
+            if (line.startsWith("MOUNT_OK ")) {
+                text = "校验通过：" + line.substring("MOUNT_OK ".length());
+            } else if (line.startsWith("MOUNT_EMPTY ")) {
+                text = "挂载已建立但目录为空：" + line.substring("MOUNT_EMPTY ".length());
+            } else if (line.startsWith("MOUNT_LINK_OK ")) {
+                text = "该目录支持硬链接，新建文件正常："
+                        + line.substring("MOUNT_LINK_OK ".length());
+            } else if (line.startsWith("MOUNT_NO_LINK ")) {
+                text = "已自动启用兼容写入（该目录不支持硬链接）："
+                        + line.substring("MOUNT_NO_LINK ".length());
+            } else {
+                text = "校验未通过：" + line.substring(Math.min(line.length(), 11));
+            }
+            final String message = text;
+            main.post(new Runnable() {
+                @Override
+                public void run() {
+                    appendLog(message);
+                }
+            });
+        }
+    }
+
+    @Override
+    public void onMounts(java.util.List<ProotLauncher.MountReport> reports) {
+        main.post(new ReportMounts(reports));
     }
 
     /** Wraps the ready URL so the WebView is only touched from the UI thread. */

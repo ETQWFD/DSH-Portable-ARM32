@@ -16,7 +16,7 @@
 | Node.js | `scripts/build-rootfs.sh` → `NODE_VERSION` | `22.23.3` |
 | dsh | `scripts/build-rootfs.sh` → `DSH_SPEC` | `@deepseek-ai/dsh@0.2.0-rc.2` |
 | 移动适配插件 | `scripts/build-rootfs.sh` → `MOBILE_PLUGIN` | `dsh-web-mobile@3.0.4` |
-| **rootfs 版本号** | `.../core/RootfsInstaller.java` → `ROOTFS_REVISION` | `1` |
+| **rootfs 版本号** | `.../core/RootfsInstaller.java` → `ROOTFS_REVISION` | `9` |
 | PRoot / talloc / shmem | `build/native/`（Termux .deb 解出，见 `THIRD-PARTY-NOTICES.md`） | 见文档 |
 | Android SDK | `build.sh` → `SDK/build-tools/34.0.0`、`platforms/android-34` | 34.0.0 / API 34 |
 | JDK | `build.sh` → `JDK8`、`JAVA21` | `/opt/jdk8`、OpenJDK 21 |
@@ -119,6 +119,93 @@ sudo ./scripts/build-rootfs.sh
 - **Debian 大版本**（trixie → forky）：改 `DEBIAN_SUITE`，并重新确认
   `debootstrap` 支持该 suite。glibc 版本会影响 Node 官方 tarball 的兼容性。
 
+### 📋 对本项目所做的全部 dsh 兼容改动（更新 dsh 时的完整清单）
+
+dsh 是通用桌面产品，本项目把整棵 dsh 搬进了 PRoot + Android 的环境，因此做了
+四处环境适配。**每次更新 dsh 都要逐条复核**，任何一条失效都会让 Agent 直接不可用。
+
+| # | 改什么 | 位置 | 不改的后果 |
+| --- | --- | --- | --- |
+| 1 | 关闭原生插件缓存 | `app/payload/scripts/start.sh` → `NARB_DISABLE_NATIVE_CACHE=1` | 启动失败：`No usable native binding found for node-addon-require-builtin-linux-arm64-gnu` |
+| 2 | 放开沙箱与审批策略 | `start.sh` → `DSH_PERMISSION_MODE=danger-full-access`，外加 profile 的 `sandbox-policy` / `permission` 覆盖 | 每条 shell 命令被拒：`sandbox mode "workspace-write" is requested but no sandbox backend is usable on this host` |
+| 3 | 新建文件不再依赖硬链接 | `scripts/patch-dsh.py`（构建时自动套用） | 在共享存储上新建文件失败：`ENOSYS ... link '<暂存路径>'` |
+| 4 | 沙箱策略强制全权（忽略会话覆盖） | 同上 `scripts/patch-dsh.py` | Web UI 里选过受限权限的会话永久不可用：`sandbox mode "workspace-write" is requested ...` |
+
+逐条说明：
+
+**1. 原生缓存（`start.sh`）**
+`node-addon-native-custom-loader` 会把预编译的 `.node` 物化到 `os.tmpdir()`，之后
+只在 sha256 仍匹配时才复用。在 PRoot 里 `os.tmpdir()` 绑定到应用 cache 目录，
+**跨重启累积**；一旦留下坏副本，之后每次启动都失败。直接用包内预编译库即可，
+所以关掉缓存（`dsh` 在 `dsh-app-boot` 里加载该插件）。
+
+**2. 沙箱与审批（`start.sh` + profile）**
+`dsh-base` 里 `mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'`，
+且 approval 也由同一变量决定（`danger-full-access → 'never'`）。PRoot 内 bwrap 与
+Landlock 都不可用，于是受限模式必然拒绝执行；而一次性提权需要审批通道，手机端
+（尤其 headless）没有，于是 fail-closed。guest 本身就是隔离层（无特权 Android 应用
++ PRoot + 只绑定用户显式挂载的目录），因此设为 `danger-full-access`。
+profile 里的两处覆盖（`sandbox-policy`、`permission.defaultPreset`）是显式声明，
+因为 `permission-presets` 要求 sandbox 与 approval 成对匹配，否则报
+`composed sandbox and approval defaults match no preset`。
+
+**3. 硬链接（`scripts/patch-dsh.py`）**
+见下一节。
+
+**4. 沙箱策略强制全权（`scripts/patch-dsh.py`）**
+光设 `DSH_PERMISSION_MODE` 与 profile 覆盖**不够**：那只改部署默认值，而
+`sandboxPolicy.resolve()` 的优先级是
+`request.mode ?? overrideOf(session) ?? defaultMode`，Web UI 的权限选择器会写入
+**会话级覆盖**并优先于默认值。因此补丁直接把 `resolve()` 的返回值固定为
+`danger-full-access`，不再读取会话覆盖——否则用户在界面上选过一次受限模式，
+那个会话就永久报 `no sandbox backend is usable`。
+
+### 重新解压时的数据保留
+
+`RootfsInstaller.install()` 在清空旧树之前，会把 `<rootfs>/root` 整体移到
+`files/preserved-root`，解压完成后**合并回新树**（保留的副本在冲突时优先）。原因：
+
+- `/root` 里是用户数据——`.dsh/.credentials.yaml`（API Key）、`sessions`、
+  `workspace`、以及用户可能改过的 profile——这些不属于镜像；
+- 而新树里也有用户目录从未有过的东西，比如随包分发的 profile 与移动插件；
+- 所以是**合并而非替换**，两边都不可少。
+
+改动这里时务必同时确认：
+
+1. 重新解压后 `.credentials.yaml` 的**权限仍是 0600**（合并时会用
+   `Os.stat` 读回原权限，否则 dsh 会拒绝启动）；
+2. `sessions/`、`workspace/` 内容在升级后仍存在；
+3. 随包分发的 `profiles/web` 与插件在升级后仍然可用。
+
+### ⚠️ dsh 更新后必须复查的平台补丁
+
+`scripts/patch-dsh.py` 会就地修改 dsh 的两个包（`dsh-fs-local` 与
+`dsh-sandbox-policy`），
+把「新建文件的发布动作」从**只用硬链接**改为**硬链接优先、失败则排他复制**。
+原因是 Android 共享存储（`/storage/emulated/0`）在不少 ROM 上是 sdcardfs 或受限
+FUSE，对 `link()` 返回 `ENOSYS`，导致 dsh 的 write 工具创建新文件必然失败
+（改已有文件走 `rename()`，不受影响）。
+
+补丁由 `scripts/build-rootfs.sh` 自动套用，且**幂等**。但 dsh 更新后它可能失配：
+
+```bash
+# 重建时会明确报错，不会静默跳过
+python3 scripts/patch-dsh.py rootfs/debian
+# 匹配失败时输出：
+#   patch-dsh: filesystem publish: expected exactly 1 occurrence of the anchor,
+#   found 0; dsh changed shape and this patch needs updating
+```
+
+失配时需人工对齐 `patch-dsh.py` 里的锚点常量，并重新确认这三点：
+
+1. 新建文件在 `ENOSYS` 的文件系统上能成功；
+2. 目标已存在时仍**拒绝**（`EEXIST`，dsh 据此报 `FS_NOT_OBSERVED`）；
+3. 非硬链接类错误（如 `ENOSPC`）必须原样抛出，不能被吞掉。
+
+第 2 点曾经写错过：fallback 里若不加 `COPYFILE_EXCL`，排他语义就丢了。
+另外注意 **ESM 下 `node:fs` 的常量在 `constants` 命名空间里**，
+`COPYFILE_EXCL` 直接解构是 `undefined`，写出来的标志会等于 `0`。
+
 ---
 
 ## 5. 更新 PRoot 等原生二进制
@@ -177,6 +264,7 @@ readelf -d build/native/libproot.so | grep NEEDED
 - [ ] 真机 `pm clear` 后冷启动：解压无报错、界面为窄屏布局（非桌面三栏）
 - [ ] 控制台无 `required plugins did not activate`
 - [ ] `THIRD-PARTY-NOTICES.md` 的版本表已同步
+- [ ] 更新过 dsh 后，`scripts/patch-dsh.py` 两处补丁仍能匹配（否则按 §2 对齐）
 - [ ] 新增源文件带 `SPDX-License-Identifier: GPL-3.0-or-later` 头
 - [ ] 没有把 `.credentials.yaml`、`sk-` 开头的密钥、`*.keystore` 提交进仓库
 

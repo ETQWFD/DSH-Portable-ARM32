@@ -249,13 +249,34 @@ public final class TarExtractor {
         }
     }
 
+    /**
+     * Reproduce the archive's permission bits exactly.
+     *
+     * The java.io.File permission setters cannot express this: setReadable(true,
+     * false) widens to group and other together, and setWritable(true, false)
+     * does the same, so 0640 would come out 0666 -- world-writable. That is not
+     * cosmetic: dsh refuses to start when its credential store is readable beyond
+     * its owner, and a world-writable /etc is its own problem.
+     *
+     * android.system.Os.chmod takes the mode directly, including the sticky bit
+     * that /tmp needs. The File API remains as a fallback for the (unreachable in
+     * practice) case where Os is unavailable.
+     */
     private static void applyMode(File file, byte[] header) {
         long mode = readOctal(header, 100, 8);
-        file.setReadable(true, false);
+        // Restrict to the twelve permission bits; the archive's file-type bits
+        // (S_IFREG and friends) are not chmod's business.
+        int bits = (int) (mode & 07777);
+        try {
+            android.system.Os.chmod(file.getAbsolutePath(), bits);
+            return;
+        } catch (Throwable unavailable) {
+            // Fall through to the coarse approximation below.
+        }
+        file.setReadable(true, true);
         file.setWritable(true, true);
-        // Without this /bin and /usr/bin would not run at all.
-        if ((mode & 0111) != 0) {
-            file.setExecutable(true, false);
+        if ((bits & 0111) != 0) {
+            file.setExecutable(true, true);
         }
     }
 

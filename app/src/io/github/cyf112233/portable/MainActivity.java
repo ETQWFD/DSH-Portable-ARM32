@@ -51,7 +51,6 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
     private RootfsInstaller installer;
 
     private final Handler main = new Handler(Looper.getMainLooper());
-    private final ProotLauncher.Ring console = new ProotLauncher.Ring(600);
     private final StringBuilder logBuffer = new StringBuilder();
 
     private View statusBar;
@@ -65,9 +64,6 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
     private ProgressBar splashProgress;
     private Button btnPrimary;
     private Button btnSecondary;
-    private View consolePanel;
-    private TextView consoleText;
-    private ScrollView consoleScroll;
 
     private boolean activityVisible;
 
@@ -96,9 +92,6 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
         splashProgress = (ProgressBar) findViewById(R.id.splashProgress);
         btnPrimary = (Button) findViewById(R.id.btnPrimary);
         btnSecondary = (Button) findViewById(R.id.btnSecondary);
-        consolePanel = findViewById(R.id.consolePanel);
-        consoleText = (TextView) findViewById(R.id.consoleText);
-        consoleScroll = (ScrollView) findViewById(R.id.consoleScroll);
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
@@ -106,7 +99,6 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
         configureWebView();
 
         findViewById(R.id.btnConsole).setOnClickListener(new OpenTerminal());
-        findViewById(R.id.btnCloseConsole).setOnClickListener(new HideConsole());
         // The title is the settings affordance. A tap rather than a long press:
         // the first-run hint teaches it once, and a tap is what people try first.
         findViewById(R.id.titleText).setOnClickListener(new OpenSettings());
@@ -156,9 +148,44 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
     protected void onResume() {
         super.onResume();
         activityVisible = true;
-        if (consolePanel.getVisibility() == View.VISIBLE) {
-            renderConsole();
+        // The launcher is process-wide and may have moved on while this activity was
+        // in the background (the server finished starting, or exited). Re-reading its
+        // state here is what stops the header from sitting on a stale message such as
+        // "正在检查环境…" after returning from another app.
+        refreshFromLauncher();
+    }
+
+    /**
+     * Brings the header, splash text and buttons in line with the launcher.
+     *
+     * Called on every resume. It never starts or stops anything: deciding that is the
+     * user's call, and a resume is not a reason to relaunch a server.
+     */
+    private void refreshFromLauncher() {
+        if (launcher.isRunning()) {
+            if (launcher.uiUrl() != null) {
+                setStatus(Dot.OK, getString(R.string.status_running));
+                if (webView.getVisibility() != View.VISIBLE) {
+                    showWebView(launcher.uiUrl());
+                }
+                btnSecondary.setVisibility(View.VISIBLE);
+                btnSecondary.setText(R.string.btn_restart);
+            } else {
+                setStatus(Dot.WARN, getString(R.string.status_starting));
+            }
+            btnPrimary.setText(R.string.btn_stop);
+            btnPrimary.setEnabled(true);
+            return;
         }
+        // Not running: say so plainly rather than leaving the last message up.
+        if (installer.isInstalled()) {
+            setStatus(Dot.IDLE, getString(R.string.status_stopped));
+        } else {
+            setStatus(Dot.IDLE, getString(R.string.status_checking));
+        }
+        btnPrimary.setText(R.string.btn_start);
+        btnPrimary.setEnabled(true);
+        btnSecondary.setVisibility(View.GONE);
     }
 
     @Override
@@ -177,10 +204,6 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
 
     @Override
     public void onBackPressed() {
-        if (consolePanel.getVisibility() == View.VISIBLE) {
-            consolePanel.setVisibility(View.GONE);
-            return;
-        }
         if (webView.getVisibility() == View.VISIBLE && webView.canGoBack()) {
             webView.goBack();
             return;
@@ -195,7 +218,11 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
         if (requestCode == REQ_SETTINGS && resultCode == RESULT_OK) {
             boolean reinstall = data != null
                     && data.getBooleanExtra(SettingsActivity.EXTRA_REINSTALL, false);
-            if (reinstall) {
+            boolean restart = data != null
+                    && data.getBooleanExtra(SettingsActivity.EXTRA_RESTART_SERVICE, false);
+            if (reinstall || restart) {
+                // Both cases want a fresh guest: one because the tree was deleted,
+                // the other because bind mounts only exist inside a new process.
                 restartServer();
             } else {
                 toast("设置已保存，重启服务后生效");
@@ -256,13 +283,6 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
         @Override
         public void onClick(View v) {
             startActivity(new Intent(MainActivity.this, TerminalActivity.class));
-        }
-    }
-
-    private final class HideConsole implements View.OnClickListener {
-        @Override
-        public void onClick(View v) {
-            consolePanel.setVisibility(View.GONE);
         }
     }
 
@@ -428,6 +448,9 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
 
     private void restartServer() {
         appendLog("正在重启服务…");
+        // The terminal session carries the binds it was started with, so it has to go
+        // too; otherwise it would keep the old mount set alive next to the new server.
+        TerminalActivity.closeAnySession();
         launcher.stop();
         KeepAliveService.stop(this);
         webView.setVisibility(View.GONE);
@@ -436,6 +459,7 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
     }
 
     private void stopServer() {
+        TerminalActivity.closeAnySession();
         launcher.stop();
         KeepAliveService.stop(this);
         setStatus(Dot.IDLE, getString(R.string.status_stopped));
@@ -460,15 +484,11 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
         @Override
         public void run() {
             activity.appendLog(text);
-            if (activity.consolePanel.getVisibility() == View.VISIBLE) {
-                activity.renderConsole();
-            }
         }
     }
 
     @Override
     public void onLine(String line) {
-        console.add(line);
         main.post(new ApplyLine(this, line));
     }
 
@@ -588,20 +608,6 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
         main.post(new HandleExit(code));
     }
 
-    /** Scrolls a ScrollView to its bottom on the next layout pass. */
-    private static final class ScrollToBottom implements Runnable {
-        private final ScrollView view;
-
-        ScrollToBottom(ScrollView view) {
-            this.view = view;
-        }
-
-        @Override
-        public void run() {
-            view.fullScroll(View.FOCUS_DOWN);
-        }
-    }
-
     private void showSplash() {
         splash.setVisibility(View.VISIBLE);
         webView.setVisibility(View.GONE);
@@ -616,9 +622,18 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
         btnSecondary.setText(R.string.btn_restart);
     }
 
-    private void renderConsole() {
-        consoleText.setText(console.join());
-        consoleScroll.post(new ScrollToBottom(consoleScroll));
+    /** Scrolls a ScrollView to its bottom on the next layout pass. */
+    private static final class ScrollToBottom implements Runnable {
+        private final ScrollView view;
+
+        ScrollToBottom(ScrollView view) {
+            this.view = view;
+        }
+
+        @Override
+        public void run() {
+            view.fullScroll(View.FOCUS_DOWN);
+        }
     }
 
     private void appendLog(String line) {

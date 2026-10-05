@@ -161,6 +161,28 @@ profile 里的两处覆盖（`sandbox-policy`、`permission.defaultPreset`）是
 `danger-full-access`，不再读取会话覆盖——否则用户在界面上选过一次受限模式，
 那个会话就永久报 `no sandbox backend is usable`。
 
+### 挂载为何必须重启，以及界面如何提示
+
+绑定挂载（`proot -b`）**只存在于启动它的那个进程内部**，宿主侧看不到，也无法在运
+行中追加。所以：
+
+- 添加挂载后，`SettingsActivity` 会弹出确认框：「立即重启」或「稍后」。立即重启通过
+  `EXTRA_RESTART_SERVICE` 结果码交给 `MainActivity.restartServer()` 执行——重启的
+  进度界面在主界面，放在设置页会看不见。
+- **终端会话也是 proot 进程，同样握着启动时的绑定**。因此 `restartServer()` 与
+  `stopServer()` 都会先调用 `TerminalActivity.closeAnySession()`，否则会出现
+  「终端用旧挂载、服务用新挂载」的两个视图并存。
+
+改动挂载相关代码时，这三处要保持一致：启动应用挂载（`ProotLauncher`）、
+终端应用挂载（`terminal.sh` 的 `DSH_MOUNTS`）、重启时结束旧会话。
+
+### 主界面的状态从哪来
+
+顶栏状态**不是**只在启动流程里写一次：`MainActivity.onResume()` 会调用
+`refreshFromLauncher()`，按 launcher 的真实状态回填文案、按钮与 WebView。
+没有这一步，切后台再回来（或界面重建）会停在「正在检查环境…」这类过期文案上。
+`refreshFromLauncher()` 只读状态，绝不启动或停止服务——是否重启是用户的决定。
+
 ### 终端（native PTY）
 
 顶栏「终端」打开的是一个**真正的 Debian bash 会话**，不是日志面板。它由两部分组成：

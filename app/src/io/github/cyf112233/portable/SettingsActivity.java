@@ -43,6 +43,9 @@ public class SettingsActivity extends Activity {
 
     public static final String EXTRA_REINSTALL = "reinstall";
 
+    /** Set when the user asked for a restart from a confirmation dialog. */
+    public static final String EXTRA_RESTART_SERVICE = "restart_service";
+
     private DshApp app;
     private static final int REQ_STORAGE = 2;
 
@@ -335,9 +338,47 @@ public class SettingsActivity extends Activity {
                         mounts.add(new Mount(hostPath, guest, true));
                         app.setMounts(mounts);
                         renderMounts();
+                        // A bind only exists inside the running proot process, so the
+                        // mount cannot take effect until the server restarts. Offer
+                        // that here rather than leaving the user to guess why nothing
+                        // changed, but allow deferring it: restarting drops whatever
+                        // the agent is in the middle of.
+                        askRestartNow();
                     }
                 })
                 .show();
+    }
+
+    /** Confirms whether to restart the server so the new mount takes effect. */
+    private void askRestartNow() {
+        boolean running = app.launcher().isRunning();
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.mount_added_title)
+                .setMessage(running
+                        ? getString(R.string.mount_added_message)
+                        : getString(R.string.mount_added_message_idle))
+                .setPositiveButton(R.string.mount_restart_now, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        restartServiceNow();
+                    }
+                })
+                .setNegativeButton(R.string.mount_restart_later, null)
+                .show();
+    }
+
+    /**
+     * Restarts the server and returns to the main screen to watch it come up.
+     *
+     * The restart is asked for rather than performed here: the launcher and the
+     * progress UI both live in MainActivity, and doing it in one place keeps the
+     * "restarting" state visible instead of hiding it behind another screen.
+     */
+    private void restartServiceNow() {
+        Intent result = new Intent();
+        result.putExtra(EXTRA_RESTART_SERVICE, true);
+        setResult(RESULT_OK, result);
+        finish();
     }
 
     /**

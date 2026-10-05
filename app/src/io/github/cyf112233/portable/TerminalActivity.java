@@ -49,6 +49,23 @@ public class TerminalActivity extends Activity implements TerminalView.Session {
     private static Thread sharedReader;
     private static volatile boolean sharedRunning;
 
+    /**
+     * Ends any live terminal session.
+     *
+     * Called when the server restarts: a session holds the bind mounts captured when
+     * it started, so leaving it alive would keep showing the previous mount set while
+     * the new server runs with the new one -- two different views of the same guest.
+     */
+    public static void closeAnySession() {
+        sharedRunning = false;
+        Pty session = sharedPty;
+        sharedPty = null;
+        sharedBuffer = null;
+        if (session != null) {
+            session.close();
+        }
+    }
+
     private DshApp app;
     private RootfsInstaller installer;
     private Pty pty;

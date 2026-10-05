@@ -2,9 +2,13 @@
 // Copyright (C) 2026 cyf112233
 package io.github.cyf112233.portable;
 
+import android.Manifest;
 import android.app.Application;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.os.Environment;
 
 import io.github.cyf112233.portable.core.ProotLauncher;
 import io.github.cyf112233.portable.core.RootfsInstaller;
@@ -73,6 +77,62 @@ public class DshApp extends Application {
 
     public void setKeepAlive(boolean enabled) {
         prefs().edit().putBoolean(KEY_KEEP_ALIVE, enabled).apply();
+    }
+
+    /**
+     * Whether the app may read the phone's shared storage.
+     *
+     * Mounting a device directory into the guest is pointless without this: the
+     * bind would resolve to a directory the app cannot open, so the guest would see
+     * an empty tree. API 30+ requires "all files access" for this, which the runtime
+     * permission alone does not grant.
+     */
+    public boolean hasStorageAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // On API 30+ "all files access" is exactly isExternalStorageManager().
+            // The other candidates cannot be used here: checkSelfPermission answers
+            // "denied" for MANAGE_EXTERNAL_STORAGE even when granted (it is a special
+            // app-op, not a runtime permission), and READ_EXTERNAL_STORAGE is not
+            // obtainable at all on some ROMs while all-files access is already in
+            // effect. Requiring them too closed the feature for users who had
+            // genuinely granted everything the platform asks for.
+            try {
+                return Environment.isExternalStorageManager();
+            } catch (Throwable e) {
+                return false;
+            }
+        }
+        return checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /**
+     * Which storage permissions are still missing, in the words the grant flow
+     * needs: MANAGE_EXTERNAL_STORAGE is a special access that only the system
+     * settings screen can grant, READ_EXTERNAL_STORAGE is an ordinary runtime
+     * permission this app can ask for itself.
+     *
+     * @return an empty list when everything needed is in place
+     */
+    public java.util.List<String> missingStoragePermissions() {
+        java.util.List<String> missing = new java.util.ArrayList<String>();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            boolean manager;
+            try {
+                manager = Environment.isExternalStorageManager();
+            } catch (Throwable e) {
+                manager = false;
+            }
+            if (!manager) {
+                missing.add("所有文件访问权限");
+            }
+            return missing;
+        }
+        if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+            missing.add("读取存储权限");
+        }
+        return missing;
     }
 
     /** Whether the long-press-for-settings hint has been shown once. */

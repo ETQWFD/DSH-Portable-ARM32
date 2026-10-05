@@ -20,6 +20,8 @@ Android App ──► PRoot ──► Debian + Node.js ──► dsh --profile w
 - **竖屏适配**：内置 [`dsh-web-mobile`](https://github.com/mexiaosqwq/dsh-web-mobile)，
   窄屏抽屉布局、触屏可用（走 dsh 自己的插件机制，不改它的源码）
 - **目录挂载**：把手机目录挂进 Debian，**双向实时读写**（绑定挂载，非复制）
+- **真 Debian 终端**：顶栏「终端」是一个真正的 PTY 会话（自写 VT100 子集 + 4 个系统调用的 native PTY），
+  `apt`、`vim`、Ctrl-C 都正常，不是日志面板
 - **后台保活**：前台服务 + 常驻通知，可开关
 - **端口自适应**：默认端口被占用时自动顺延
 - **离线可用**：除模型 API 外不依赖网络

@@ -78,6 +78,20 @@ find "$BUILD/classes" -name '*.class' > "$BUILD/classlist.txt"
   --output "$BUILD/dex" @"$BUILD/classlist.txt"
 [ -f "$BUILD/dex/classes.dex" ] || { echo "d8 produced no dex; aborting" >&2; exit 1; }
 
+echo "==> building native PTY library"
+# Termux's clang already targets Android (aarch64-linux-android24) and brings its own
+# bionic sysroot, so the NDK is not needed for one small shared library. The static
+# libraries are absent from that toolchain, which is fine: a JNI library is loaded by
+# the app process and must stay dynamic anyway.
+JNI_INCLUDE="${JNI_INCLUDE:-/opt/jdk8/include}"
+if [ ! -f "$JNI_INCLUDE/jni.h" ]; then
+  echo "missing jni.h under $JNI_INCLUDE" >&2
+  exit 1
+fi
+clang -shared -fPIC -O2 -Wno-unused-parameter \
+  -I"$JNI_INCLUDE" -I"$JNI_INCLUDE/linux" \
+  -o "$BUILD/stage/lib/arm64-v8a/libdshpty.so" "$APP/jni/pty.c"
+
 echo "==> staging native executables"
 for name in libproot.so libproot_loader.so libtalloc.so libandroid-shmem.so; do
   src="$BUILD/native/$name"

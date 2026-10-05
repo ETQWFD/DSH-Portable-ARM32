@@ -20,6 +20,7 @@
 | PRoot / talloc / shmem | `build/native/`（Termux .deb 解出，见 `THIRD-PARTY-NOTICES.md`） | 见文档 |
 | Android SDK | `build.sh` → `SDK/build-tools/34.0.0`、`platforms/android-34` | 34.0.0 / API 34 |
 | JDK | `build.sh` → `JDK8`、`JAVA21` | `/opt/jdk8`、OpenJDK 21 |
+| native 编译 | `build.sh` → `clang` + `JNI_INCLUDE` | Termux clang（Android 目标）、`/opt/jdk8/include` |
 
 `ROOTFS_REVISION` 是最容易漏的一处：它决定**已安装的设备是否重新解压**。
 rootfs 内容一变就必须 +1，否则老用户永远停在旧树。
@@ -160,6 +161,37 @@ profile 里的两处覆盖（`sandbox-policy`、`permission.defaultPreset`）是
 `danger-full-access`，不再读取会话覆盖——否则用户在界面上选过一次受限模式，
 那个会话就永久报 `no sandbox backend is usable`。
 
+### 终端（native PTY）
+
+顶栏「终端」打开的是一个**真正的 Debian bash 会话**，不是日志面板。它由两部分组成：
+
+| 部分 | 位置 | 说明 |
+| --- | --- | --- |
+| PTY | `app/jni/pty.c` → `libdshpty.so` | openpty + fork/exec `/system/bin/sh` + TIOCSWINSZ + read/write |
+| 渲染与输入 | `.../term/TerminalBuffer.java`、`TerminalView.java` | 自写的 VT100 子集与单元格网格 |
+
+为什么不用现成的：Android 没有 PTY API；dsh 里虽然带了 `node-pty`，但它**只有
+linux-x64 预编译**，在 arm64 guest 里加载不了；而引入 Termux 整套终端栈意味着一棵
+JNI 树、一个 vendored View 库和第二个构建系统，为一个只需要 4 个系统调用的功能。
+
+**native 怎么编**：用 Termux 的 clang，它本身就 target `aarch64-linux-android24`
+并自带 bionic sysroot，**不需要装 900 MB 的 NDK**（见 `build.sh` 的
+`building native PTY library` 一段）。注意该工具链没有静态库，所以不能静态链接——
+JNI 库本来就该动态加载，这不构成问题。
+
+**会话如何启动**：native 只负责开 PTY 并把 `/system/bin/sh` 跑起来，guest 的启动
+（proot、绑定、loader 变量）全在 `app/payload/scripts/terminal.sh` 里，改它不需要
+重新编译 native。会话的 PTY 节点在 `/dev/pts`，所以脚本里**必须**保留
+`-b /dev/pts`，否则 guest 看不到自己所在的终端。
+
+**实现边界**：支持 C0 控制、光标移动与擦除、SGR 颜色/属性、备用屏、应用键模式、
+UTF-8。**不支持**字符集表、鼠标上报、括号粘贴、滚动区——依赖这些的全屏程序
+（vim 可用，少数更老的编辑器）显示会失真。改动前先读 `TerminalBuffer` 顶部的注释。
+
+**会话生命周期**：会话刻意比 Activity 活得久（旋转、返回界面都不中断），
+由「结束会话」显式关闭。用 `sharedPty` / `sharedBuffer` 静态字段实现，
+改动这块时注意别让 Activity 持有会泄漏的引用。
+
 ### 重新解压时的数据保留
 
 `RootfsInstaller.install()` 在清空旧树之前，会把 `<rootfs>/root` 整体移到
@@ -265,7 +297,8 @@ readelf -d build/native/libproot.so | grep NEEDED
 - [ ] 控制台无 `required plugins did not activate`
 - [ ] `THIRD-PARTY-NOTICES.md` 的版本表已同步
 - [ ] 更新过 dsh 后，`scripts/patch-dsh.py` 两处补丁仍能匹配（否则按 §2 对齐）
-- [ ] 新增源文件带 `SPDX-License-Identifier: GPL-3.0-or-later` 头
+- [ ] 新增源文件带 `SPDX-License-Identifier: GPL-3.0-or-later` 头（含 `.c`）
+- [ ] 改过 `app/jni/pty.c` 后，真机开一次终端确认会话可交互
 - [ ] 没有把 `.credentials.yaml`、`sk-` 开头的密钥、`*.keystore` 提交进仓库
 
 ```bash

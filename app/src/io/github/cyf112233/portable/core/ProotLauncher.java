@@ -2,7 +2,11 @@
 // Copyright (C) 2026 cyf112233
 package io.github.cyf112233.portable.core;
 
+import android.Manifest;
 import android.content.Context;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.os.Environment;
 
 import io.github.cyf112233.portable.DshApp;
 import android.util.Log;
@@ -117,6 +121,83 @@ public final class ProotLauncher {
      * @return the port actually used, which may differ from {@code port} when the
      *         preferred one is already taken.
      */
+    /**
+     * A line describing exactly how storage access was judged.
+     *
+     * Written to the console on every launch because "the mount button is disabled
+     * and I do not know why" and "the mount is enabled but the guest sees nothing"
+     * are otherwise indistinguishable from inside the app: the device's own
+     * permission UI, the app-op state and the platform API can disagree on some
+     * ROMs, and this line says which of them the app actually saw.
+     */
+    public String storageAccessReport() {
+        StringBuilder report = new StringBuilder();
+        report.append("存储权限判定（API ").append(Build.VERSION.SDK_INT).append("）：");
+        report.append("checkSelfPermission(MANAGE_EXTERNAL_STORAGE)=")
+                .append(permissionState(Manifest.permission.MANAGE_EXTERNAL_STORAGE));
+        report.append("，isExternalStorageManager=");
+        try {
+            report.append(Environment.isExternalStorageManager() ? "有" : "无");
+        } catch (Throwable e) {
+            report.append("异常(").append(e.getClass().getSimpleName()).append(")");
+        }
+        report.append("，读外部存储=")
+                .append(permissionState(Manifest.permission.READ_EXTERNAL_STORAGE));
+        report.append("；本 API 的实际判据=")
+                .append(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                        ? "isExternalStorageManager（另两条仅供诊断，不代表授权状态）"
+                        : "READ_EXTERNAL_STORAGE");
+        boolean allowed = app != null && app.hasStorageAccess();
+        report.append("，列举共享存储=").append(storageProbeFailure() == null ? "成功" : "失败");
+        report.append(allowed ? " → 挂载可用" : " → 挂载停用");
+        // Also dropped next to the extracted tree: when the UI cannot be inspected
+        // (no uiautomator, restricted dumpsys) this file is the only way to see what
+        // the app itself concluded.
+        try {
+            java.io.FileWriter writer = new java.io.FileWriter(
+                    new File(context.getFilesDir(), "storage-access.txt"));
+            try {
+                writer.write(report.toString());
+            } finally {
+                writer.close();
+            }
+        } catch (IOException e) {
+            Log.w(TAG, "could not record the storage verdict: " + e.getMessage());
+        }
+        return report.toString();
+    }
+
+    /**
+     * Whether the app can actually enumerate the phone's shared storage.
+     *
+     * The permission APIs disagree with each other on some ROMs, so the verdict the
+     * app acts on is this one: a real listing of the directory it would bind into
+     * the guest. Anything else is an opinion.
+     *
+     * @return null when the directory lists fine, otherwise the failure text
+     */
+    public String storageProbeFailure() {
+        File shared = Environment.getExternalStorageDirectory();
+        if (shared == null || !shared.isDirectory()) {
+            return "共享存储路径不可用";
+        }
+        String[] entries = shared.list();
+        if (entries == null) {
+            return "无法读取 " + shared.getAbsolutePath() + "（权限不足）";
+        }
+        return null;
+    }
+
+    /** "有" / "无" / "异常(类型)" for one permission, never throwing. */
+    private String permissionState(String permission) {
+        try {
+            return context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+                    ? "有" : "无";
+        } catch (Throwable e) {
+            return "异常(" + e.getClass().getSimpleName() + ")";
+        }
+    }
+
     public int start(int port, Listener listener) throws IOException {
         if (isRunning()) {
             throw new IOException("服务已在运行");
@@ -195,7 +276,15 @@ public final class ProotLauncher {
         // User-configured mounts come last so they win over the built-ins, and
         // each guest path is created (and checked empty) first.
         mountReports.clear();
-        if (app != null) {
+        if (app != null && !app.hasStorageAccess() && !app.mounts().isEmpty()) {
+            // Do not attempt the binds at all: without all-files access they would
+            // resolve to unreadable directories and the guest would see empty trees,
+            // which looks like a broken mount rather than a missing permission.
+            for (Mount mount : app.mounts()) {
+                mountReports.add(new MountReport(mount.hostPath, mount.guestPath,
+                        false, "缺少「所有文件访问权限」，未挂载"));
+            }
+        } else if (app != null) {
             for (Mount mount : app.mounts()) {
                 if (!mount.enabled) {
                     mountReports.add(new MountReport(mount.hostPath, mount.guestPath,

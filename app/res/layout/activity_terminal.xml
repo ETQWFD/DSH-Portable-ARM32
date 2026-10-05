@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/scrim">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@color/bar_bg"
+        android:paddingStart="10dp"
+        android:paddingEnd="4dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/bar_fg"
+            android:text="@string/terminal_title" />
+
+        <TextView
+            android:id="@+id/terminalStatus"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textSize="11.5sp"
+            android:textColor="@color/bar_fg_dim" />
+
+        <Button
+            android:id="@+id/btnTerminalBack"
+            android:layout_width="wrap_content"
+            android:layout_height="38dp"
+            android:minWidth="0dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:textSize="12.5sp"
+            android:textColor="@color/bar_fg_dim"
+            android:background="@android:color/transparent"
+            android:text="@string/terminal_back" />
+
+        <Button
+            android:id="@+id/btnTerminalClose"
+            android:layout_width="wrap_content"
+            android:layout_height="38dp"
+            android:minWidth="0dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:textSize="12.5sp"
+            android:textColor="@color/err"
+            android:background="@android:color/transparent"
+            android:text="@string/terminal_close" />
+    </LinearLayout>
+
+    <io.github.cyf112233.portable.term.TerminalView
+        android:id="@+id/terminalView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <!-- Keys a soft keyboard cannot send. Wrapped so a narrow phone still fits them. -->
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/bar_bg"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp">
+
+            <Button
+                android:id="@+id/btnKeyEsc"
+                style="@style/TerminalKey"
+                android:text="ESC" />
+
+            <Button
+                android:id="@+id/btnKeyTab"
+                style="@style/TerminalKey"
+                android:text="TAB" />
+
+            <Button
+                android:id="@+id/btnCtrl"
+                style="@style/TerminalKey"
+                android:text="Ctrl" />
+
+            <Button
+                android:id="@+id/btnAlt"
+                style="@style/TerminalKey"
+                android:text="Alt" />
+
+            <Button
+                android:id="@+id/btnKeyCtrlC"
+                style="@style/TerminalKey"
+                android:text="^C" />
+
+            <Button
+                android:id="@+id/btnKeyLeft"
+                style="@style/TerminalKey"
+                android:text="←" />
+
+            <Button
+                android:id="@+id/btnKeyUp"
+                style="@style/TerminalKey"
+                android:text="↑" />
+
+            <Button
+                android:id="@+id/btnKeyDown"
+                style="@style/TerminalKey"
+                android:text="↓" />
+
+            <Button
+                android:id="@+id/btnKeyRight"
+                style="@style/TerminalKey"
+                android:text="→" />
+        </LinearLayout>
+    </HorizontalScrollView>
+</LinearLayout>

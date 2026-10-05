@@ -105,7 +105,7 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
 
         configureWebView();
 
-        findViewById(R.id.btnConsole).setOnClickListener(new ToggleConsole());
+        findViewById(R.id.btnConsole).setOnClickListener(new OpenTerminal());
         findViewById(R.id.btnCloseConsole).setOnClickListener(new HideConsole());
         // The title is the settings affordance. A tap rather than a long press:
         // the first-run hint teaches it once, and a tap is what people try first.
@@ -251,15 +251,11 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
         }
     }
 
-    private final class ToggleConsole implements View.OnClickListener {
+    /** Opens the interactive Debian shell. */
+    private final class OpenTerminal implements View.OnClickListener {
         @Override
         public void onClick(View v) {
-            if (consolePanel.getVisibility() == View.VISIBLE) {
-                consolePanel.setVisibility(View.GONE);
-            } else {
-                renderConsole();
-                consolePanel.setVisibility(View.VISIBLE);
-            }
+            startActivity(new Intent(MainActivity.this, TerminalActivity.class));
         }
     }
 
@@ -404,6 +400,7 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
         btnPrimary.setEnabled(false);
         btnPrimary.setText("启动中…");
         btnSecondary.setVisibility(View.GONE);
+        appendLog(app.launcher().storageAccessReport());
         appendLog("启动 PRoot → Debian → dsh web（端口 " + app.port() + "）…");
 
         try {

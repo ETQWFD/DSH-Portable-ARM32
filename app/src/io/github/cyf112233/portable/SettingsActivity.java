@@ -46,9 +46,27 @@ public class SettingsActivity extends Activity {
     private DshApp app;
     private static final int REQ_STORAGE = 2;
 
+    /**
+     * The prefix every acceptable host path must live under, as the platform itself
+     * names it: /storage/emulated/&lt;userId&gt;.
+     *
+     * Read off the shared-storage path rather than from an API, so a secondary user
+     * or a work profile is accepted on its own terms instead of being compared
+     * against a hard-coded 0.
+     */
+    private static String sharedStorageRoot() {
+        String path = Environment.getExternalStorageDirectory().getAbsolutePath();
+        while (path.length() > 1 && path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
+        return path;
+    }
+
     private EditText editPort;
     private TextView textRootfsInfo;
     private LinearLayout mountList;
+    private TextView mountNotice;
+    private Button addMountButton;
     private Switch switchKeepAlive;
 
     @Override
@@ -60,6 +78,8 @@ public class SettingsActivity extends Activity {
         editPort = (EditText) findViewById(R.id.editPort);
         textRootfsInfo = (TextView) findViewById(R.id.textRootfsInfo);
         mountList = (LinearLayout) findViewById(R.id.mountList);
+        mountNotice = (TextView) findViewById(R.id.mountNotice);
+        addMountButton = (Button) findViewById(R.id.btnAddMount);
         switchKeepAlive = (Switch) findViewById(R.id.switchKeepAlive);
 
         editPort.setText(Integer.toString(app.port()));
@@ -89,9 +109,16 @@ public class SettingsActivity extends Activity {
                 confirmReinstall();
             }
         });
-        ((Button) findViewById(R.id.btnAddMount)).setOnClickListener(new View.OnClickListener() {
+        addMountButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                // Re-checked at the point of use: the user may have just returned
+                // from the system grant screen.
+                if (!app.hasStorageAccess()) {
+                    requestStorageAccess();
+                    toast(getString(R.string.mount_needs_access));
+                    return;
+                }
                 addMount();
             }
         });
@@ -113,6 +140,10 @@ public class SettingsActivity extends Activity {
     protected void onResume() {
         super.onResume();
         updateGrantButton();
+        // The user may have just granted access in the system screen.
+        if (addMountButton != null) {
+            renderMounts();
+        }
     }
 
     // ---- directory mounts -------------------------------------------------
@@ -120,6 +151,17 @@ public class SettingsActivity extends Activity {
     /** One row per configured mount: enable toggle, paths, and a delete button. */
     private void renderMounts() {
         mountList.removeAllViews();
+
+        // Without all-files access a bind over shared storage reads as an empty
+        // directory, so the feature is closed off rather than left to fail quietly.
+        boolean allowed = app.hasStorageAccess();
+        addMountButton.setEnabled(allowed);
+        addMountButton.setAlpha(allowed ? 1f : 0.5f);
+        mountNotice.setVisibility(allowed ? View.GONE : View.VISIBLE);
+        if (!allowed) {
+            mountNotice.setText(R.string.mount_needs_access_long);
+        }
+
         final List<Mount> mounts = app.mounts();
         if (mounts.isEmpty()) {
             TextView empty = new TextView(this);
@@ -198,19 +240,23 @@ public class SettingsActivity extends Activity {
         }
     }
 
-    /** Ask for a host directory (with presets) and a guest mount point. */
+    /**
+     * Ask for a host directory and a guest mount point.
+     *
+     * Only shared storage is offered: it is the one place the app can reach with the
+     * permissions it has, and the guest path is constrained to /root/<name> because
+     * binding over /root itself would hide the home directory dsh lives in.
+     */
     private void addMount() {
+        final String external = Environment.getExternalStorageDirectory().getAbsolutePath();
         final String[] presets = {
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                        .getAbsolutePath(),
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-                        .getAbsolutePath(),
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM)
-                        .getAbsolutePath(),
-                Environment.getExternalStorageDirectory().getAbsolutePath(),
+                external,
+                new File(external, Environment.DIRECTORY_DOWNLOADS).getAbsolutePath(),
+                new File(external, Environment.DIRECTORY_DOCUMENTS).getAbsolutePath(),
+                new File(external, Environment.DIRECTORY_DCIM).getAbsolutePath(),
         };
         final String[] labels = {
-                "Download", "Documents", "DCIM", "内部存储根目录", "手动输入…",
+                "共享存储根目录", "Download", "Documents", "DCIM", "手动输入…",
         };
 
         new AlertDialog.Builder(this)
@@ -250,7 +296,7 @@ public class SettingsActivity extends Activity {
     private void askGuestPath(final String hostPath) {
         final EditText input = new EditText(this);
         input.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
-        input.setHint("/mnt/phone");
+        input.setHint("/root/123");
         new AlertDialog.Builder(this)
                 .setTitle(R.string.settings_mount_guest)
                 .setMessage(hostPath)
@@ -271,6 +317,11 @@ public class SettingsActivity extends Activity {
                         // The guest path must be empty, or the bind would hide the
                         // files the rootfs keeps there.
                         StringBuilder reason = new StringBuilder();
+                        String error = validateMount(hostPath, guest);
+                        if (error != null) {
+                            toast(error);
+                            return;
+                        }
                         StringBuilder notice = new StringBuilder();
                         if (Mount.prepareGuestDir(app.installer().rootfsDir(), guest,
                                 reason, notice) == null) {
@@ -289,6 +340,46 @@ public class SettingsActivity extends Activity {
                 .show();
     }
 
+    /**
+     * The two placement rules this screen enforces.
+     *
+     * Guest side: /root/<name>, never /root itself -- binding over the home
+     * directory hides everything dsh keeps there, including its profile.
+     *
+     * Host side: the current user's shared storage and nothing else, because that is
+     * the only tree all-files access covers; anything else would be rejected by the
+     * platform at read time.
+     *
+     * @return null when the pair is acceptable, otherwise the reason to show
+     */
+    private String validateMount(String hostPath, String guestPath) {
+        String host = hostPath == null ? "" : hostPath.trim();
+        String guest = guestPath == null ? "" : guestPath.trim();
+
+        if (!guest.startsWith("/root/") || guest.equals("/root/")
+                || guest.substring("/root/".length()).replace("/", "").length() == 0) {
+            return "Debian 内路径必须形如 /root/xxx，不能直接挂到 /root";
+        }
+        if (guest.contains("..")) {
+            return "Debian 内路径不能包含 ..";
+        }
+
+        String shared = Environment.getExternalStorageDirectory().getAbsolutePath();
+        if (!host.equals(shared) && !host.startsWith(shared + "/")) {
+            return "只能挂载共享存储：" + shared + " 或其子目录";
+        }
+        // Belt and braces: the same rule stated in platform terms, with the trailing
+        // separator so /storage/emulated/10 cannot pass as user 1.
+        String userRoot = sharedStorageRoot();
+        if (!host.equals(userRoot) && !host.startsWith(userRoot + "/")) {
+            return "只能挂载当前用户的共享存储：" + userRoot;
+        }
+        if (host.contains("..")) {
+            return "手机目录不能包含 ..";
+        }
+        return null;
+    }
+
     // ---- storage permission ----------------------------------------------
 
     /**
@@ -297,36 +388,59 @@ public class SettingsActivity extends Activity {
      * the system surface that actually grants it.
      */
     private void requestStorageAccess() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (Environment.isExternalStorageManager()) {
-                toast(getString(R.string.settings_mount_granted));
-                return;
-            }
-            try {
-                Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-                intent.setData(Uri.parse("package:" + getPackageName()));
-                startActivity(intent);
-            } catch (Exception e) {
-                startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
-            }
-        } else {
+        List<String> missing = app.missingStoragePermissions();
+        if (missing.isEmpty()) {
+            toast(getString(R.string.settings_mount_granted));
+            return;
+        }
+        // Two different mechanisms, so ask in order: the ordinary runtime permission
+        // can be requested here, while all-files access only exists on a system
+        // settings screen.
+        boolean needsLegacy = checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED;
+        if (needsLegacy) {
             requestPermissions(new String[] { Manifest.permission.READ_EXTERNAL_STORAGE }, REQ_STORAGE);
+            return;
+        }
+        openAllFilesAccessSettings();
+    }
+
+    private void openAllFilesAccessSettings() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return;
+        }
+        try {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+            intent.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        } catch (Exception e) {
+            try {
+                startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+            } catch (Exception e2) {
+                toast("无法打开系统授权页：" + e2.getMessage());
+            }
         }
     }
 
     private void updateGrantButton() {
         Button button = (Button) findViewById(R.id.btnGrantStorage);
-        boolean granted;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            granted = Environment.isExternalStorageManager();
-        } else {
-            granted = checkCallingOrSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
-                    == PackageManager.PERMISSION_GRANTED;
+        List<String> missing = app.missingStoragePermissions();
+        if (missing.isEmpty()) {
+            button.setText(R.string.settings_mount_granted);
+            button.setEnabled(false);
+            return;
         }
-        button.setText(granted
-                ? R.string.settings_mount_granted
-                : R.string.settings_mount_grant);
-        button.setEnabled(!granted);
+        StringBuilder label = new StringBuilder(getString(R.string.settings_mount_grant));
+        label.append("（缺：");
+        for (int i = 0; i < missing.size(); i++) {
+            if (i > 0) {
+                label.append("、");
+            }
+            label.append(missing.get(i));
+        }
+        label.append("）");
+        button.setText(label.toString());
+        button.setEnabled(true);
     }
 
     @Override

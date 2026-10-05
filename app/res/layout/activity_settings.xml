@@ -148,6 +148,18 @@
                 android:textColor="@color/bar_fg_dim"
                 android:text="@string/settings_mounts_note" />
 
+            <TextView
+                android:id="@+id/mountNotice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:padding="10dp"
+                android:background="@drawable/bg_card"
+                android:textSize="11.5sp"
+                android:lineSpacingExtra="3dp"
+                android:textColor="@color/warn"
+                android:visibility="gone" />
+
             <LinearLayout
                 android:id="@+id/mountList"
                 android:layout_width="match_parent"

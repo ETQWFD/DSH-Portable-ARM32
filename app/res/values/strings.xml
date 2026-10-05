@@ -14,7 +14,7 @@
     <string name="btn_stop">停止</string>
     <string name="btn_restart">重启</string>
     <string name="btn_settings">设置</string>
-    <string name="btn_console">控制台</string>
+    <string name="btn_console">终端</string>
     <string name="btn_browser">浏览器打开</string>
     <string name="btn_hide_bar">隐藏工具条</string>
 
@@ -47,11 +47,13 @@
     <string name="notif_stop">停止服务</string>
 
     <string name="settings_mounts">目录挂载</string>
-    <string name="settings_mounts_note">把手机上的目录挂进 Debian，双向实时读写同一份文件。目标目录若已有内容，挂载期间会被手机目录遮住。</string>
+    <string name="settings_mounts_note">把手机共享存储的目录挂进 Debian（双向实时读写同一份文件）。手机侧只能选共享存储；Debian 侧必须是 /root/xxx，例如 /root/123。目标目录若已有内容，挂载期间会被遮住。</string>
     <string name="settings_mount_add">添加挂载</string>
     <string name="settings_mount_host">手机目录（宿主路径）</string>
-    <string name="settings_mount_guest">Debian 内路径（必须是空目录）</string>
+    <string name="settings_mount_guest">Debian 内路径（须为 /root/xxx）</string>
     <string name="settings_mount_grant">申请存储权限</string>
+    <string name="mount_needs_access">需要「所有文件访问权限」才能挂载</string>
+    <string name="mount_needs_access_long">挂载需要完整的存储权限：既要有「所有文件访问权限」，也要有「读取存储权限」，且应用必须能真正列出共享存储目录。三者缺一即停用挂载——请点下方按钮逐项补齐。</string>
     <string name="settings_mount_granted">已获得全部文件访问权限</string>
     <string name="settings_mount_none">尚未配置挂载</string>
     <string name="mount_preset_download">Download</string>
@@ -72,4 +74,9 @@
     <string name="hint_never">不再提示</string>
 
     <string name="err_port">端口无效</string>
+
+    <string name="terminal_title">Debian 终端</string>
+    <string name="terminal_back">返回界面</string>
+    <string name="terminal_close">结束会话</string>
+    <string name="btn_terminal">终端</string>
 </resources>

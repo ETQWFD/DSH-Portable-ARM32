@@ -46,6 +46,13 @@
             android:label="设置" />
 
         <activity
+            android:name="io.github.cyf112233.portable.TerminalActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode"
+            android:windowSoftInputMode="adjustResize"
+            android:label="终端" />
+
+        <activity
             android:name="io.github.cyf112233.portable.AboutActivity"
             android:exported="false"
             android:screenOrientation="portrait"

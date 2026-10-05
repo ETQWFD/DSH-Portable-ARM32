@@ -76,6 +76,8 @@
     <string name="err_port">端口无效</string>
 
     <string name="mount_added_title">挂载已添加</string>
+    <string name="mount_removed_title">挂载已删除</string>
+    <string name="mount_removed_message">挂载要重启服务才会解除。现在重启会中断 Agent 正在进行的任务。</string>
     <string name="mount_added_message">挂载要重启服务才会生效。现在重启会中断 Agent 正在进行的任务。</string>
     <string name="mount_added_message_idle">服务当前未运行，下次启动时生效。</string>
     <string name="mount_restart_now">立即重启</string>

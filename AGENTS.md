@@ -166,9 +166,11 @@ profile 里的两处覆盖（`sandbox-policy`、`permission.defaultPreset`）是
 绑定挂载（`proot -b`）**只存在于启动它的那个进程内部**，宿主侧看不到，也无法在运
 行中追加。所以：
 
-- 添加挂载后，`SettingsActivity` 会弹出确认框：「立即重启」或「稍后」。立即重启通过
-  `EXTRA_RESTART_SERVICE` 结果码交给 `MainActivity.restartServer()` 执行——重启的
-  进度界面在主界面，放在设置页会看不见。
+- **增删挂载都会**弹出确认框（`askRestartForMountChange`）：「立即重启」或「稍后」。
+  立即重启通过 `EXTRA_RESTART_SERVICE` 结果码交给 `MainActivity.restartServer()`
+  执行——重启的进度界面在主界面，放在设置页会看不见。
+- 两个入口共用同一个方法，只是标题与文案不同（`mount_added_*` / `mount_removed_*`）；
+  再增删挂载相关的操作时也走它，避免出现"改了但没人提示重启"的路径。
 - **终端会话也是 proot 进程，同样握着启动时的绑定**。因此 `restartServer()` 与
   `stopServer()` 都会先调用 `TerminalActivity.closeAnySession()`，否则会出现
   「终端用旧挂载、服务用新挂载」的两个视图并存。

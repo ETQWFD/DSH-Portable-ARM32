@@ -234,6 +234,11 @@ public class SettingsActivity extends Activity {
                         current.remove(index);
                         app.setMounts(current);
                         renderMounts();
+                        // Removing is a mount change too: the binding is still live in
+                        // the running process until it is restarted.
+                        askRestartForMountChange(R.string.mount_removed_title,
+                                R.string.mount_removed_message,
+                                R.string.mount_added_message_idle);
                     }
                 }
             });
@@ -343,20 +348,30 @@ public class SettingsActivity extends Activity {
                         // that here rather than leaving the user to guess why nothing
                         // changed, but allow deferring it: restarting drops whatever
                         // the agent is in the middle of.
-                        askRestartNow();
+                        askRestartForMountChange(R.string.mount_added_title,
+                                R.string.mount_added_message,
+                                R.string.mount_added_message_idle);
                     }
                 })
                 .show();
     }
 
-    /** Confirms whether to restart the server so the new mount takes effect. */
-    private void askRestartNow() {
+    /**
+     * Confirms whether to restart the server so a mount change takes effect.
+     *
+     * A bind exists only inside the proot process that was started with it, so no
+     * mount edit -- adding or removing -- can apply to a running server. Asking here
+     * is what keeps that from looking like the edit was ignored.
+     *
+     * @param titleRes   what just happened
+     * @param runningRes message to use while the server is up
+     * @param idleRes    message to use when it is not running
+     */
+    private void askRestartForMountChange(int titleRes, int runningRes, int idleRes) {
         boolean running = app.launcher().isRunning();
         new AlertDialog.Builder(this)
-                .setTitle(R.string.mount_added_title)
-                .setMessage(running
-                        ? getString(R.string.mount_added_message)
-                        : getString(R.string.mount_added_message_idle))
+                .setTitle(titleRes)
+                .setMessage(getString(running ? runningRes : idleRes))
                 .setPositiveButton(R.string.mount_restart_now, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {

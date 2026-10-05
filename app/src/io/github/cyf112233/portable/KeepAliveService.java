@@ -39,7 +39,7 @@ public class KeepAliveService extends Service {
 
     private Handler handler;
     private Runnable ticker;
-    private String status = "正在启动…";
+    private String status;
 
     public static void start(Context context, String status) {
         Intent intent = new Intent(context, KeepAliveService.class);
@@ -84,7 +84,8 @@ public class KeepAliveService extends Service {
         createChannel();
         // Must be posted promptly: a foreground service that never calls
         // startForeground is killed by the platform.
-        startForeground(NOTIFICATION_ID, buildNotification("正在启动…"));
+        startForeground(NOTIFICATION_ID,
+                buildNotification(getString(R.string.status_starting)));
     }
 
     @Override
@@ -119,11 +120,16 @@ public class KeepAliveService extends Service {
                 ProotLauncher launcher = app.launcher();
                 String current;
                 if (!launcher.isRunning()) {
-                    current = "服务未运行";
+                    current = getString(R.string.status_stopped);
                 } else if (launcher.uiUrl() != null) {
-                    current = "运行中 · http://127.0.0.1:" + app.port();
+                    // Report the port the server actually bound, not the preferred
+                    // one: the preferred port may have been taken and the launcher
+                    // moved on to the next free one.
+                    current = getString(R.string.status_running)
+                            + " · " + getString(R.string.notif_port)
+                            + " " + portOf(launcher.uiUrl(), app.port());
                 } else {
-                    current = "正在启动…";
+                    current = getString(R.string.status_starting);
                 }
                 if (!current.equals(status)) {
                     status = current;
@@ -133,6 +139,25 @@ public class KeepAliveService extends Service {
             }
         };
         handler.postDelayed(ticker, 3000);
+    }
+
+    /**
+     * The port out of the server's ready URL, falling back to the preferred one.
+     *
+     * @param url       the tokenised URL dsh printed, or null
+     * @param preferred the port the user asked for
+     */
+    private static int portOf(String url, int preferred) {
+        if (url == null) {
+            return preferred;
+        }
+        try {
+            int port = java.net.URI.create(url).getPort();
+            return port > 0 ? port : preferred;
+        } catch (Exception e) {
+            Log.w(TAG, "could not read the port from " + url);
+            return preferred;
+        }
     }
 
     private void stopTicker() {

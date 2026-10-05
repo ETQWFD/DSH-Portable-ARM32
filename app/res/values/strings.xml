@@ -43,6 +43,7 @@
     <string name="notif_channel_desc">保活通知，用于让 DeepSeek Harness 在后台持续运行</string>
     <string name="notif_title">DSH Portable</string>
     <string name="notif_text">DeepSeek Harness 服务已在后台启动</string>
+    <string name="notif_port">端口</string>
     <string name="notif_stop">停止服务</string>
 
     <string name="settings_mounts">目录挂载</string>

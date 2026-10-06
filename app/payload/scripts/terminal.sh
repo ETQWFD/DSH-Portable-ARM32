@@ -78,7 +78,55 @@ else
     GUEST_SHELL=/bin/sh
 fi
 
-PROOT_TMP_DIR="$DSH_TMP" \
-PROOT_LOADER="$DSH_LOADER" \
-LD_LIBRARY_PATH="$DSH_LIBS" \
-exec "$DSH_PROOT" -0 -r "$DSH_ROOT" "$@" -w /root "$GUEST_SHELL" -i
+# Launch proot, selecting the syscall tracer the device kernel can handle.
+#
+# Many 32-bit ARM phones run old kernels/vendor ROMs whose seccomp-bpf is
+# incompatible with proot's accelerated tracer; proot then dies or hangs before
+# the first prompt (a black/dead terminal). The app sets DSH_FORCE_NO_SECCOMP=1
+# on armeabi-v7a, so those devices take the pure-ptrace path straight away.
+#
+# On 64-bit we keep the faster default tracer but, if it exits non-zero before
+# the guest is usable, retry once with seccomp disabled, so a broken seccomp
+# setup never strands the user on an empty screen. "$@" below is the bind list
+# built above (this is the script's own positional parameters, not a function's).
+RC=0
+if [ "${DSH_FORCE_NO_SECCOMP:-0}" = "1" ]; then
+    echo "dsh-terminal: 以兼容模式启动（32 位 / 关闭 seccomp，纯 ptrace）…"
+    PROOT_NO_SECCOMP=1 \
+    PROOT_TMP_DIR="$DSH_TMP" \
+    PROOT_LOADER="$DSH_LOADER" \
+    LD_LIBRARY_PATH="$DSH_LIBS" \
+    "$DSH_PROOT" -0 -r "$DSH_ROOT" "$@" -w /root "$GUEST_SHELL" -i
+    RC=$?
+else
+    PROOT_TMP_DIR="$DSH_TMP" \
+    PROOT_LOADER="$DSH_LOADER" \
+    LD_LIBRARY_PATH="$DSH_LIBS" \
+    "$DSH_PROOT" -0 -r "$DSH_ROOT" "$@" -w /root "$GUEST_SHELL" -i
+    RC=$?
+    if [ "$RC" -ne 0 ]; then
+        echo ""
+        echo "dsh-terminal: 默认模式退出（exit=$RC），正在以兼容模式（关闭 seccomp）重试…"
+        PROOT_NO_SECCOMP=1 \
+        PROOT_TMP_DIR="$DSH_TMP" \
+        PROOT_LOADER="$DSH_LOADER" \
+        LD_LIBRARY_PATH="$DSH_LIBS" \
+        "$DSH_PROOT" -0 -r "$DSH_ROOT" "$@" -w /root "$GUEST_SHELL" -i
+        RC=$?
+    fi
+fi
+
+if [ "$RC" -ne 0 ]; then
+    echo ""
+    echo "=============================================================="
+    echo " Debian 终端启动失败（proot 退出码=$RC）。请截图本屏反馈，并附："
+    echo "   手机型号 / Android 版本 / 剩余存储空间"
+    echo " DSH_FORCE_NO_SECCOMP=${DSH_FORCE_NO_SECCOMP:-0}（1=32位兼容模式）"
+    echo " ROOT=$DSH_ROOT"
+    echo " 常见原因：内核禁用 ptrace、安全/省电软件拦截、存储空间不足。"
+    echo "=============================================================="
+    # Keep the PTY alive so the message stays on screen instead of vanishing.
+    echo "按回车键关闭本窗口…"
+    read _dsh_dummy 2>/dev/null || sleep 20
+fi
+exit "$RC"

@@ -42,8 +42,8 @@ D8_JAR="$SDK/build-tools/34.0.0/lib/d8.jar"
 
 MIN_SDK=24
 TARGET_SDK=34
-VERSION_CODE=3
-VERSION_NAME=1.1.0
+VERSION_CODE=4
+VERSION_NAME=1.1.1
 OUT="$BUILD/dsh-portable-unsigned.apk"
 ALIGNED="$BUILD/dsh-portable-aligned.apk"
 SIGNED="$BUILD/dsh-portable.apk"

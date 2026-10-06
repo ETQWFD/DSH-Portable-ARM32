@@ -18,6 +18,7 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
 
+import io.github.cyf112233.portable.core.Abi;
 import io.github.cyf112233.portable.core.Mount;
 import io.github.cyf112233.portable.core.RootfsInstaller;
 import io.github.cyf112233.portable.term.Pty;
@@ -346,6 +347,11 @@ public class TerminalActivity extends Activity implements TerminalView.Session {
         environment.add("DSH_LIBS=" + libs.getAbsolutePath());
         environment.add("DSH_TMP=" + tmp.getAbsolutePath());
         environment.add("DSH_MOUNTS=" + mounts.toString().trim());
+        // 32-bit ARM devices almost always run old kernels/ROMs whose seccomp-bpf
+        // breaks Termux's proot (it dies or hangs the moment it starts). Force the
+        // pure-ptrace path there; 64-bit keeps the faster seccomp path and the
+        // launcher script still falls back automatically if that ever fails.
+        environment.add("DSH_FORCE_NO_SECCOMP=" + (Abi.is64Bit() ? "0" : "1"));
         return environment.toArray(new String[0]);
     }
 }

@@ -1,5 +1,13 @@
 # DSH Portable
 
+> **双架构通用版（本仓库）**：一个 APK 同时打包 **arm64-v8a（64 位）** 与
+> **armeabi-v7a（32 位 ARMv7）**。本仓库是在 [cyf112233/DSH-Portable](https://github.com/cyf112233/DSH-Portable)
+> 基础上新增 32 位支持的社区构建，遵循原项目 **GPL-3.0-or-later** 协议开源，全部上游版权与许可声明保留不变。
+>
+> - **64 位手机（arm64-v8a）**：DeepSeek AI 网页服务 + Debian 终端，全部功能与上游一致。
+> - **32 位老手机（armeabi-v7a）**：完整可用的 **Debian 13 Linux 终端 + Node.js 22 / npm**（bash、apt 等正常）。
+>   dsh 的 AI 服务仅支持 64 位（原因见下文[「关于 32 位」](#关于-32-位-armv7)），32 位机上 App 会直接引导进入终端。
+
 **在 Android 手机上本地运行完整的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)** ——
 不用 root，不用 Termux，装一个 APK 就有。
 
@@ -31,8 +39,8 @@ Android App ──► PRoot ──► Debian + Node.js ──► dsh --profile w
 | 项目 | 要求 |
 | --- | --- |
 | Android | 7.0 (API 24) 及以上 |
-| 架构 | **arm64-v8a** |
-| 存储 | 安装后约 520 MB |
+| 架构 | **arm64-v8a**（AI 服务 + 终端）与 **armeabi-v7a**（仅终端），同一个 APK |
+| 存储 | 64 位约 520 MB；32 位约 300 MB（系统按自身 ABI 只解压对应镜像） |
 
 ## 安装
 
@@ -54,20 +62,49 @@ Android App ──► PRoot ──► Debian + Node.js ──► dsh --profile w
    | 重新安装环境 | 重新解压 rootfs；**`/root` 下的用户数据（API Key、会话、工作区）会保留** |
    | 关于与开源协议 | 组件版本与协议全文 |
 
+## 关于 32 位（ARMv7）
+
+**32 位镜像能做什么**：完整的 Debian 13（trixie, armhf）终端——`bash`、`apt`、
+`vim`、联网安装软件包，以及官方 **Node.js 22（linux-armv7l）+ npm 10**，可正常运行
+纯 JS / N-API 中自带 armv7 预编译的程序。首次启动自动解压，PTY、挂载、后台保活等
+终端相关能力与 64 位一致。
+
+**为什么 32 位没有 AI 服务**：dsh 唯一的必需原生模块
+[`node-addon-require-builtin`](https://github.com/deepseek-ai/dsh-node-addon-require-builtin)
+官方只发布 **x64 / arm64** 预编译包。该模块的工作原理是直接解析 V8 私有机器码与内存布局，
+每个架构需要单独的 getter 解析器；源码里不存在 `linux_glibc_arm` 解析器，在 armv7 上会
+按设计「fail closed」拒绝加载（见其 `docs/support-matrix.md`）。这不是权限或打包问题，
+而是上游不支持、且无法在不逆向 32 位 V8 内部 ABI 的前提下可靠补齐，因此不做实验性塞入。
+终端功能不依赖该模块，故在 32 位上独立、完整可用。
+
+32 位原生库（`proot` / `libtalloc` / `libandroid-shmem`）取自 Termux 官方 **arm** 软件包；
+PTY JNI 库 `libdshpty.so` 由官方 NDK 对 `app/jni/pty.c` 交叉编译而来。架构选择在
+`app/src/.../core/Abi.java`：Android 自动按设备 ABI 抽取对应的 `lib/<abi>` 目录，
+App 在首次解压时按 ABI 选择 `rootfs/debian-arm64.tar.gz` 或 `rootfs/debian-arm.tar.gz`。
+
 ## 自行构建
 
-需要 **aarch64 Linux**、root，以及 `debootstrap`、`android-sdk-build-tools`、
-`aapt`、`zipalign`、`apksigner`、`zip`、`python3` 和一份 JDK 8（编译用）。
+双架构 APK 可在普通 **x86_64 Linux** 上交叉构建（不再要求 aarch64 主机）。需要
+`debootstrap`、`qemu-user-static`、一个支持 statx 的 `proot`（≥ 5.4；Ubuntu 22.04 自带的
+5.1 不行，可用 Ubuntu 24.04 或从源码编译 `proot-me/proot`）、`aapt`、`zipalign`、
+`apksigner`、`zip`、`python3`、JDK 8（`javac`）以及一份 Android **NDK**（r26 测试通过，
+用于编译两种 ABI 的 `libdshpty.so`）和 SDK `platforms/android-34` + `build-tools/34.0.0`。
 
 ```bash
-sudo ./scripts/build-rootfs.sh    # 生成 rootfs（约 5–15 分钟）
-./build.sh                        # 产出 build/dsh-portable.apk
+# 1) 两个 rootfs（sudo；arm64 沿用上游脚本，armhf 用新增脚本）
+sudo ./scripts/build-rootfs.sh          # -> app/payload/rootfs/debian-arm64.tar.gz（含 dsh）
+sudo ./scripts/build-rootfs-armhf.sh    # -> app/payload/rootfs/debian-arm.tar.gz（终端 + Node）
+
+# 2) 一个双 ABI APK（自动用 NDK 编译 arm64 + armv7 的 PTY 库，打包两套 lib 与两个 rootfs）
+ANDROID_HOME=/path/to/sdk NDK_DIR=/path/to/android-ndk-r26d ./build.sh
+#    -> build/dsh-portable.apk
 ```
 
-`scripts/patch-dsh.py` 在生成 rootfs 时自动给 dsh 打两处 Android 适配补丁；
-`build.sh` 不用 Gradle：Debian 原生 `aapt` 编译资源、JDK 8 + `d8` 生成 dex、
-`zipalign` 对齐、`apksigner` 签名。为什么必须这么绕、以及各工具的版本约束，
-见 [AGENTS.md §6](AGENTS.md#6-构建系统的几个硬性约束)。
+`scripts/patch-dsh.py` 在生成 arm64 rootfs 时自动给 dsh 打两处 Android 适配补丁；
+`build.sh` 不用 Gradle：Debian 原生 `aapt` 编译资源、JDK 8 + `d8` 生成 dex、NDK clang
+编译两种 ABI 的 JNI 库、`zipalign` 对齐、`apksigner` 签名。armhf rootfs 的跨架构制作
+细节（statx、libatomic、qemu+proot）见 `scripts/build-rootfs-armhf.sh` 顶部注释；
+其余版本约束见 [AGENTS.md §6](AGENTS.md#6-构建系统的几个硬性约束)。
 
 ## 更新上游版本
 

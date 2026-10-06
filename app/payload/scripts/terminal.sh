@@ -34,6 +34,20 @@ if [ ! -x "$DSH_PROOT" ]; then
 fi
 [ -d "$DSH_TMP" ] || mkdir -p "$DSH_TMP" 2>/dev/null
 
+# Self-contained linker setup. On the dsh path ProotLauncher.prepareLinkerLibs
+# materialises libtalloc.so.2 into $DSH_LIBS before launch, but a pure terminal
+# session (notably on 32-bit, where the dsh service is unavailable) must not
+# depend on that having run. Rebuild the two files proot links against from the
+# extracted native-library directory, which always holds the per-ABI copies.
+NATIVE_DIR=$(dirname "$DSH_PROOT")
+mkdir -p "$DSH_LIBS" 2>/dev/null
+if [ ! -f "$DSH_LIBS/libtalloc.so.2" ] && [ -f "$NATIVE_DIR/libtalloc.so" ]; then
+    cp "$NATIVE_DIR/libtalloc.so" "$DSH_LIBS/libtalloc.so.2" 2>/dev/null || true
+fi
+if [ ! -f "$DSH_LIBS/libandroid-shmem.so" ] && [ -f "$NATIVE_DIR/libandroid-shmem.so" ]; then
+    cp "$NATIVE_DIR/libandroid-shmem.so" "$DSH_LIBS/libandroid-shmem.so" 2>/dev/null || true
+fi
+
 # Build the bind list. /dev/pts is the important one: this session's PTY node lives
 # there, and without it the guest cannot see (or the shell cannot re-open) the
 # terminal it is running on.

@@ -29,6 +29,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import io.github.cyf112233.portable.core.Abi;
 import io.github.cyf112233.portable.core.ProotLauncher;
 import io.github.cyf112233.portable.core.RootfsInstaller;
 
@@ -179,11 +180,17 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
         }
         // Not running: say so plainly rather than leaving the last message up.
         if (installer.isInstalled()) {
-            setStatus(Dot.IDLE, getString(R.string.status_stopped));
+            if (!Abi.is64Bit()) {
+                setStatus(Dot.IDLE, "终端就绪（32 位 ARM）");
+                btnPrimary.setText(R.string.btn_terminal);
+            } else {
+                setStatus(Dot.IDLE, getString(R.string.status_stopped));
+                btnPrimary.setText(R.string.btn_start);
+            }
         } else {
             setStatus(Dot.IDLE, getString(R.string.status_checking));
+            btnPrimary.setText(R.string.btn_start);
         }
-        btnPrimary.setText(R.string.btn_start);
         btnPrimary.setEnabled(true);
         btnSecondary.setVisibility(View.GONE);
     }
@@ -345,8 +352,12 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
             activity.btnPrimary.setText(R.string.btn_start);
             if (success) {
                 activity.appendLog("根文件系统安装完成。");
-                activity.setStatus(Dot.OK, activity.getString(R.string.status_installed));
-                activity.launchServer();
+                if (Abi.is64Bit()) {
+                    activity.setStatus(Dot.OK, activity.getString(R.string.status_installed));
+                    activity.launchServer();
+                } else {
+                    activity.openTerminalOnly(true);
+                }
             } else {
                 activity.setStatus(Dot.ERR, activity.getString(R.string.status_error));
                 activity.splashHint.setText("安装失败：" + error);
@@ -397,7 +408,11 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
         setStatus(Dot.IDLE, getString(R.string.status_checking));
 
         if (installer.isInstalled()) {
-            launchServer();
+            if (Abi.is64Bit()) {
+                launchServer();
+            } else {
+                openTerminalOnly(false);
+            }
             return;
         }
 
@@ -413,7 +428,38 @@ public class MainActivity extends Activity implements ProotLauncher.Listener {
         worker.start();
     }
 
+    /**
+     * The 32-bit (ARMv7) experience: dsh's AI service has no linux-arm native
+     * build, so instead of a WebView we hand the user the fully working Debian
+     * terminal (bash/apt/Node 22). Called after install or on the first launch
+     * of an already-installed 32-bit image.
+     */
+    private void openTerminalOnly(boolean justInstalled) {
+        showSplash();
+        setStatus(Dot.IDLE, "终端就绪（32 位 ARM）");
+        splashProgress.setIndeterminate(false);
+        splashHint.setText("这是 32 位 ARM 设备：AI 服务仅支持 64 位，终端可正常使用。");
+        appendLog(justInstalled
+                ? "32 位环境就绪。点右上角「终端」进入 Debian（bash / apt / Node 22）。"
+                : "32 位终端版：点右上角「终端」进入 Debian。AI 服务仅支持 64 位设备。");
+        btnPrimary.setText(R.string.btn_terminal);
+        btnPrimary.setEnabled(true);
+        btnSecondary.setVisibility(View.GONE);
+        // On this ABI the primary button is the terminal launcher.
+        btnPrimary.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(MainActivity.this, TerminalActivity.class));
+            }
+        });
+    }
+
     private void launchServer() {
+        // dsh cannot run on linux-arm (its native addon fails closed there).
+        if (!Abi.is64Bit()) {
+            openTerminalOnly(false);
+            return;
+        }
         setStatus(Dot.WARN, getString(R.string.status_starting));
         splashHint.setText(R.string.status_starting);
         splashProgress.setIndeterminate(true);

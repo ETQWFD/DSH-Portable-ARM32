@@ -40,9 +40,10 @@ public final class RootfsInstaller {
      *      a device that saw them only as intermediate builds.
      *   2  first shipping revision of the published APK.
      */
-    private static final int ROOTFS_REVISION = 9;
+    private static final int ROOTFS_REVISION = 10;
 
-    private static final String ASSET_ARCHIVE = "rootfs/debian-arm64.tar.gz";
+    // The archive is chosen per ABI at extraction time (see Abi.rootfsAsset()):
+    // arm64 devices unpack the full dsh image, ARMv7 devices the terminal image.
 
     private final Context context;
 
@@ -130,7 +131,7 @@ public final class RootfsInstaller {
             listener.onProgress("正在解压 Debian 根文件系统…", 0);
             long started = System.currentTimeMillis();
             AssetManager assets = context.getAssets();
-            InputStream raw = assets.open(ASSET_ARCHIVE, AssetManager.ACCESS_STREAMING);
+            InputStream raw = assets.open(Abi.rootfsAsset(), AssetManager.ACCESS_STREAMING);
             final Listener target = listener;
             int entries;
             try {

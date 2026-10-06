@@ -2,6 +2,8 @@
 build/*
 !build/native/
 !build/native/*
+!build/native-armeabi-v7a/
+!build/native-armeabi-v7a/*
 
 # The rootfs is a ~154 MB generated artifact (and its ~520 MB unpacked tree).
 # Regenerate with scripts/build-rootfs.sh -- never commit either form.

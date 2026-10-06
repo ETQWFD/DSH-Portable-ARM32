@@ -3,50 +3,78 @@
 # Copyright (C) 2026 cyf112233
 # Builds the DSH Portable APK without Gradle.
 #
-# Why not the usual toolchain: the Android Gradle plugin wants an x86-64 JDK and
-# a Gradle daemon, and the official build-tools ship x86-64 ELF binaries. This
-# host is aarch64, so the build uses Debian's native aarch64 `aapt` for resource
-# compilation plus the JVM-only parts of the SDK (d8) and Debian's zipalign and
-# apksigner. Everything below is the same work AGP would do, invoked directly.
+# Dual-ABI edition: one APK that carries BOTH arm64-v8a and armeabi-v7a.
+#   * arm64-v8a    -> full dsh AI service + terminal (rootfs debian-arm64.tar.gz)
+#   * armeabi-v7a  -> Termux-style Debian terminal + Node 22 (rootfs debian-arm.tar.gz)
+# Android installs the native-library directory matching the device ABI itself;
+# the matching rootfs archive is chosen at runtime by core/Abi.java.
+#
+# Designed to run on an x86_64 Linux host using the JVM-only SDK pieces plus the
+# official Android NDK (which ships clang for every target ABI):
+#   aapt (Debian) compiles resources, d8.jar dexes the Java, the NDK builds the
+#   PTY JNI library for both ABIs, then zipalign + apksigner finish the APK.
+#
+# Override inputs with env vars if your layout differs:
+#   ANDROID_HOME  dir containing platforms/android-34 and build-tools/34.0.0
+#   NDK_DIR       an unpacked Android NDK (r26 tested)
+#   JDK8          JDK 8 home (javac 8 required by this d8 build)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 APP="$HERE/app"
 BUILD="$HERE/build"
 SDK="${ANDROID_HOME:-$HERE/sdk}"
+NDK_DIR="${NDK_DIR:-$HERE/../android-ndk-r26d}"
 PLATFORM="$SDK/platforms/android-34/android.jar"
 
-# Two JDKs on purpose. javac 8 is the last compiler whose class-file output this
-# R8 build accepts (javac 9+ output trips an internal R8 error), while d8 itself
-# is compiled for Java 11+, so it must run on the modern JVM.
-JDK8="${JDK8:-/opt/jdk8}"
-JAVA21="${JAVA21:-/usr/lib/jvm/java-21-openjdk-arm64}"
+# javac 8 is the last compiler whose class-file output this d8 build accepts,
+# while d8 itself needs Java 11+. Locate both, tolerating 11/17/21 for d8.
+JDK8="${JDK8:-/usr/lib/jvm/java-8-openjdk-amd64}"
+[ -x "$JDK8/bin/javac" ] || JDK8="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
+if [ -x /usr/lib/jvm/java-21-openjdk-amd64/bin/java ]; then
+    JAVA_RUN=/usr/lib/jvm/java-21-openjdk-amd64/bin/java
+elif [ -x /usr/lib/jvm/java-17-openjdk-amd64/bin/java ]; then
+    JAVA_RUN=/usr/lib/jvm/java-17-openjdk-amd64/bin/java
+else
+    JAVA_RUN="java"
+fi
 D8_JAR="$SDK/build-tools/34.0.0/lib/d8.jar"
-D8="$SDK/build-tools/34.0.0/d8"
 
 MIN_SDK=24
 TARGET_SDK=34
+VERSION_CODE=3
+VERSION_NAME=1.1.0
 OUT="$BUILD/dsh-portable-unsigned.apk"
 ALIGNED="$BUILD/dsh-portable-aligned.apk"
 SIGNED="$BUILD/dsh-portable.apk"
 KEYSTORE="$BUILD/debug.keystore"
 
-for tool in "$D8_JAR" "$PLATFORM" "$JDK8/bin/javac" "$JAVA21/bin/java"; do
+JNI_INCLUDE="$JDK8/include"
+TC="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"
+
+for tool in "$D8_JAR" "$PLATFORM" "$JDK8/bin/javac"; do
   [ -e "$tool" ] || { echo "missing build tool: $tool" >&2; exit 1; }
 done
+[ -x "$TC/bin/aarch64-linux-android24-clang" ] || { echo "missing NDK clang under $TC (set NDK_DIR)" >&2; exit 1; }
 for tool in aapt zipalign apksigner keytool zip; do
   command -v "$tool" >/dev/null || { echo "missing host tool: $tool" >&2; exit 1; }
 done
-export PATH="$JAVA21/bin:$PATH"
+[ -f "$JNI_INCLUDE/jni.h" ] || { echo "missing jni.h under $JNI_INCLUDE" >&2; exit 1; }
+export PATH="$(dirname "$JAVA_RUN"):$PATH"
+
+# ABI -> (clang prefix, staged lib dir, prebuilt payload dir)
+ARM64_CC="$TC/bin/aarch64-linux-android24-clang"
+ARM64_LIB="$BUILD/stage/lib/arm64-v8a"
+ARM64_PRE="$BUILD/native"
+ARM7_CC="$TC/bin/armv7a-linux-androideabi24-clang"
+ARM7_LIB="$BUILD/stage/lib/armeabi-v7a"
+ARM7_PRE="$BUILD/native-armeabi-v7a"
 
 echo "==> cleaning"
 rm -rf "$BUILD/gen" "$BUILD/classes" "$BUILD/dex" "$BUILD/stage" "$BUILD/res-linked.apk"
-mkdir -p "$BUILD/gen" "$BUILD/classes" "$BUILD/dex" "$BUILD/stage/lib/arm64-v8a"
+mkdir -p "$BUILD/gen" "$BUILD/classes" "$BUILD/dex" "$ARM64_LIB" "$ARM7_LIB"
 
 echo "==> packaging resources and assets (aapt)"
-# No -A here on purpose: aapt embeds whatever it finds in the assets directory
-# verbatim, and an empty one makes it fail silently (no R.java, no error). The
-# rootfs and start.sh are added later by tools/addzip.py instead.
 aapt package -f -m \
   -M "$APP/AndroidManifest.xml" \
   -S "$APP/res" \
@@ -55,17 +83,15 @@ aapt package -f -m \
   -F "$BUILD/stage/base.apk" \
   --min-sdk-version "$MIN_SDK" \
   --target-sdk-version "$TARGET_SDK" \
-  --version-code 1 --version-name 1.0
+  --version-code "$VERSION_CODE" --version-name "$VERSION_NAME"
 
-echo "==> compiling java"
+echo "==> compiling java (JDK 8)"
 find "$APP/src" "$BUILD/gen" -name '*.java' > "$BUILD/sources.txt"
 "$JDK8/bin/javac" -source 8 -target 8 -encoding UTF-8 \
   -bootclasspath "$PLATFORM" \
   -d "$BUILD/classes" \
   -Xlint:-options \
   @"$BUILD/sources.txt"
-# Matched by name rather than by fully qualified path: the package has moved once
-# already, and a stale path here fails in a confusing way after a rename.
 if ! find "$BUILD/classes" -name 'MainActivity.class' -print -quit | grep -q .; then
   echo "javac produced no MainActivity; aborting" >&2
   exit 1
@@ -73,42 +99,35 @@ fi
 
 echo "==> dexing (d8)"
 find "$BUILD/classes" -name '*.class' > "$BUILD/classlist.txt"
-"$JAVA21/bin/java" -cp "$D8_JAR" com.android.tools.r8.D8 \
+"$JAVA_RUN" -cp "$D8_JAR" com.android.tools.r8.D8 \
   --release --min-api "$MIN_SDK" --lib "$PLATFORM" \
   --output "$BUILD/dex" @"$BUILD/classlist.txt"
 [ -f "$BUILD/dex/classes.dex" ] || { echo "d8 produced no dex; aborting" >&2; exit 1; }
 
-echo "==> building native PTY library"
-# Termux's clang already targets Android (aarch64-linux-android24) and brings its own
-# bionic sysroot, so the NDK is not needed for one small shared library. The static
-# libraries are absent from that toolchain, which is fine: a JNI library is loaded by
-# the app process and must stay dynamic anyway.
-JNI_INCLUDE="${JNI_INCLUDE:-/opt/jdk8/include}"
-if [ ! -f "$JNI_INCLUDE/jni.h" ]; then
-  echo "missing jni.h under $JNI_INCLUDE" >&2
-  exit 1
-fi
-clang -shared -fPIC -O2 -Wno-unused-parameter \
-  -I"$JNI_INCLUDE" -I"$JNI_INCLUDE/linux" \
-  -o "$BUILD/stage/lib/arm64-v8a/libdshpty.so" "$APP/jni/pty.c"
-
-echo "==> staging native executables"
-for name in libproot.so libproot_loader.so libtalloc.so libandroid-shmem.so; do
-  src="$BUILD/native/$name"
-  [ -f "$src" ] || { echo "missing native payload: $src" >&2; exit 1; }
-  cp "$src" "$BUILD/stage/lib/arm64-v8a/$name"
-done
-chmod 755 "$BUILD/stage/lib/arm64-v8a/"*
+# build_native <cc> <staged-lib-dir> <prebuilt-dir> <human ABI>
+build_native() {
+  local cc="$1" libdir="$2" predir="$3" abi="$4"
+  echo "==> native ($abi): PTY JNI library"
+  "$cc" -shared -fPIC -O2 -Wno-unused-parameter \
+    -I"$JNI_INCLUDE" -I"$JNI_INCLUDE/linux" \
+    -o "$libdir/libdshpty.so" "$APP/jni/pty.c"
+  echo "==> native ($abi): staging proot/talloc/shmem"
+  for name in libproot.so libproot_loader.so libtalloc.so libandroid-shmem.so; do
+    [ -f "$predir/$name" ] || { echo "missing native payload ($abi): $predir/$name" >&2; exit 1; }
+    cp "$predir/$name" "$libdir/$name"
+  done
+  chmod 755 "$libdir/"*
+}
+build_native "$ARM64_CC" "$ARM64_LIB" "$ARM64_PRE" "arm64-v8a"
+build_native "$ARM7_CC"  "$ARM7_LIB"  "$ARM7_PRE" "armeabi-v7a"
 
 echo "==> assembling apk"
 cp "$BUILD/stage/base.apk" "$OUT"
 ( cd "$BUILD/dex" && zip -q -X "$OUT" classes.dex )
 ( cd "$BUILD/stage" && zip -q -X -r "$OUT" lib )
 
-# The payload is added here rather than passed to aapt through -A: aapt embeds
-# whatever sits in the assets directory verbatim, which would place the rootfs in
-# the archive before zipalign ever sees it. ZIP_STORED keeps the already-gzipped
-# rootfs from being deflated a second time.
+# Both rootfs archives (arm64 + arm) live under app/payload/rootfs and are stored
+# verbatim so the already-gzipped payload is not deflated a second time.
 if [ -d "$APP/payload" ]; then
   PAYLOAD_ARGS=()
   while IFS= read -r f; do
@@ -133,11 +152,11 @@ if [ ! -f "$KEYSTORE" ]; then
     >/dev/null 2>&1
 fi
 apksigner sign --ks "$KEYSTORE" --ks-pass pass:android --key-pass pass:android \
-  --ks-key-alias dshportable --v1-signing-enabled true --v2-signing-enabled true \
-  --out "$SIGNED" "$ALIGNED"
+    --ks-key-alias dshportable --v1-signing-enabled true --v2-signing-enabled true \
+    --out "$SIGNED" "$ALIGNED"
 
 echo "==> verifying"
 apksigner verify --print-certs "$SIGNED" | head -4
-aapt dump badging "$SIGNED" | head -5
+aapt dump badging "$SIGNED" | grep -E 'package:|native-code|application-label:'
 echo
 echo "==> $(ls -la "$SIGNED" | awk '{print $5" bytes"}')  $SIGNED"
